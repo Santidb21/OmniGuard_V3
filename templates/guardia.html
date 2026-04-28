@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OmniGuard - Panel del Guardia</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/estilos.css') }}">
+    <style>
+        .dashboard-panel {
+            display: grid;
+            grid-template-columns: 320px 1fr;
+            gap: 16px;
+            padding: 16px;
+            min-height: calc(100vh - 80px);
+        }
+        
+        .panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 16px;
+        }
+        
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .panel-title {
+            font-size: 0.95rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .panel-badge {
+            background: var(--accent);
+            color: var(--bg-primary);
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.65rem;
+            font-weight: 600;
+        }
+        
+        .scroll-list {
+            flex: 1;
+            overflow-y: auto;
+            max-height: 280px;
+        }
+        
+        .config-section {
+            margin-bottom: 16px;
+        }
+        
+        .config-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        
+        .config-label {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            min-width: 70px;
+        }
+        
+        .config-select {
+            flex: 1;
+            padding: 8px 10px;
+            font-size: 0.8rem;
+        }
+        
+        .btn-config {
+            padding: 8px 14px;
+            font-size: 0.75rem;
+        }
+        
+        .camaras-status {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        
+        .camara-chip {
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.7rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+        }
+        
+        .camara-chip.active {
+            background: rgba(74, 222, 128, 0.15);
+            border-color: var(--success);
+            color: var(--success);
+        }
+        
+        .video-section {
+            display: grid;
+            grid-template-columns: 1fr 160px;
+            gap: 12px;
+        }
+        
+        .video-main {
+            background: var(--bg-secondary);
+            border-radius: var(--radius);
+            overflow: hidden;
+            height: 280px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .video-main img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        .video-thumbs {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        .video-thumb {
+            background: var(--bg-secondary);
+            border-radius: var(--radius);
+            overflow: hidden;
+            height: 85px;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: var(--transition);
+        }
+        
+        .video-thumb.active {
+            border-color: var(--accent);
+        }
+        
+        .video-thumb img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        .video-thumb-label {
+            position: absolute;
+            bottom: 2px;
+            left: 2px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            font-size: 0.6rem;
+            padding: 2px 4px;
+            border-radius: 4px;
+        }
+        
+        .card-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            margin-bottom: 8px;
+        }
+        
+        .card-foto {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 2px solid var(--border-light);
+        }
+        
+        .card-info {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .card-nombre {
+            font-weight: 600;
+            font-size: 0.85rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .card-meta {
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+            display: flex;
+            gap: 6px;
+        }
+        
+        .card-tipo {
+            font-size: 0.6rem;
+            padding: 2px 5px;
+            border-radius: 6px;
+            text-transform: uppercase;
+        }
+        
+        .card-tipo.residente {
+            background: rgba(201, 169, 98, 0.15);
+            color: var(--accent);
+        }
+        
+        .card-tipo.visitante {
+            background: rgba(96, 165, 250, 0.15);
+            color: #60a5fa;
+        }
+        
+        .card-borrar {
+            background: none;
+            border: 1px solid var(--danger);
+            color: var(--danger);
+            padding: 6px 10px;
+            border-radius: var(--radius);
+            cursor: pointer;
+            font-size: 0.7rem;
+        }
+        
+        .card-borrar:hover {
+            background: var(--danger);
+            color: white;
+        }
+        
+        .registro-row {
+            display: flex;
+            align-items: center;
+            padding: 8px 10px;
+            background: var(--bg-secondary);
+            border-radius: var(--radius);
+            margin-bottom: 6px;
+            font-size: 0.8rem;
+        }
+        
+        .registro-id { font-weight: 700; color: var(--accent); min-width: 40px; }
+        .registro-tipo { min-width: 70px; }
+        .registro-casa { min-width: 50px; }
+        .registro-fecha { flex: 1; color: var(--text-secondary); font-size: 0.75rem; }
+        
+        .accion-badge {
+            padding: 2px 6px;
+            font-size: 0.6rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            border-radius: 6px;
+        }
+        
+        .accion-badge.entrada { background: rgba(74, 222, 128, 0.15); color: var(--success); }
+        .accion-badge.salida { background: rgba(239, 68, 68, 0.15); color: var(--danger); }
+        
+        .filtros-bar {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 20px;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+        }
+        
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.75rem;
+        }
+        
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--success);
+        }
+        
+        .status-dot.inactive { background: var(--danger); }
+        
+        @media (max-width: 1100px) {
+            .dashboard-panel { grid-template-columns: 1fr; }
+            .video-section { grid-template-columns: 1fr; }
+            .video-thumbs { flex-direction: row; }
+            .video-thumb { height: 60px; }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="container">
+            <div class="logo">OMNI<span>GUARD</span></div>
+            <nav style="display: flex; align-items: center; gap: 14px;">
+                <div class="status-indicator">
+                    <span class="status-dot" id="statusDot"></span>
+                    <span id="statusText">Sistema activo</span>
+                </div>
+                <ul class="nav-links">
+                    <li><a href="/guardia">Panel</a></li>
+                    <li><a href="/logout">Salir</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <main class="dashboard-panel">
+        <div class="dashboard-izq" style="display: flex; flex-direction: column; gap: 14px;">
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title"><span>⚙️</span> Config Cámaras</div>
+                </div>
+                <div class="camaras-status" id="camarasStatus">
+                    <span class="camara-chip">Detectando...</span>
+                </div>
+                <div class="config-section">
+                    <div class="config-row">
+                        <span class="config-label">Entrada:</span>
+                        <select class="form-select config-select" id="camaraEntrada">
+                            <option value="-1">Sin asignar</option>
+                        </select>
+                    </div>
+                    <div class="config-row">
+                        <span class="config-label">Salida:</span>
+                        <select class="form-select config-select" id="camaraSalida">
+                            <option value="-1">Sin asignar</option>
+                        </select>
+                    </div>
+                    <div class="config-row">
+                        <button class="btn btn-primary btn-config" onclick="iniciarCamaras()">Iniciar Cámaras</button>
+                        <button class="btn btn-config" onclick="detenerCamaras()">Detener</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="panel" style="max-height: 350px; display: flex; flex-direction: column;">
+                <div class="panel-header">
+                    <div class="panel-title"><span>📋</span> Solicitudes</div>
+                    <span class="panel-badge" id="solicitudesCount">0</span>
+                </div>
+                <div class="scroll-list" id="solicitudesList">
+                    <div class="empty-state">Sin solicitudes</div>
+                </div>
+            </div>
+            
+            <div class="panel" style="max-height: 350px; display: flex; flex-direction: column;">
+                <div class="panel-header">
+                    <div class="panel-title"><span>👥</span> Usuarios Registrados</div>
+                    <span class="panel-badge" id="usuariosCount">0</span>
+                </div>
+                <div class="scroll-list" id="usuariosList">
+                    <div class="empty-state">Sin usuarios</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="dashboard-der" style="display: flex; flex-direction: column; gap: 14px;">
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title"><span>📹</span> Cámaras</div>
+                </div>
+                <div class="video-section">
+                    <div class="video-main">
+                        <img id="videoMain" src="" onerror="this.style.display='none'">
+                        <div class="empty-state" id="videoPlaceholder" style="display: none;">Seleccione una camara</div>
+                    </div>
+                    <div class="video-thumbs">
+                        <div class="video-thumb active" onclick="cambiarVideo('entrada')">
+                            <img id="thumbEntrada" src="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 60%22><rect fill=%22%231a1a1a%22 width=%22100%22 height=%2260%22/><text fill=%22%23666%22 x=%2250%22 y=%2230%22 text-anchor=%22middle%22 font-size=%2210%22>Entrada</text></svg>'">
+                            <span class="video-thumb-label">Entrada</span>
+                        </div>
+                        <div class="video-thumb" onclick="cambiarVideo('salida')">
+                            <img id="thumbSalida" src="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 60%22><rect fill=%22%231a1a1a%22 width=%22100%22 height=%2260%22/><text fill=%22%23666%22 x=%2250%22 y=%2230%22 text-anchor=%22middle%22 font-size=%2210%22>Salida</span></svg>'">
+                            <span class="video-thumb-label">Salida</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="panel" style="flex: 1;">
+                <div class="panel-header">
+                    <div class="panel-title"><span>📊</span> Registros</div>
+                </div>
+                <div class="filtros-bar">
+                    <select class="form-select" id="filtroTipo" onchange="cargarRegistros()" style="width: auto; padding: 6px 8px; font-size: 0.75rem;">
+                        <option value="">Todos</option>
+                        <option value="residente">Residentes</option>
+                        <option value="visitante">Visitantes</option>
+                    </select>
+                    <select class="form-select" id="filtroAccion" onchange="cargarRegistros()" style="width: auto; padding: 6px 8px; font-size: 0.75rem;">
+                        <option value="">Accion</option>
+                        <option value="entrada">Entrada</option>
+                        <option value="salida">Salida</option>
+                    </select>
+                </div>
+                <div class="scroll-list" id="registrosList">
+                    <div class="empty-state">Sin registros</div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        let videoActual = 'entrada';
+        
+        function showAlert(msg) { alert(msg); }
+        
+        async function detectarCamaras() {
+            try {
+                const resp = await fetch('/api/camaras/detectar');
+                const data = await resp.json();
+                
+                const statusDiv = document.getElementById('camarasStatus');
+                const entradaSel = document.getElementById('camaraEntrada');
+                const salidaSel = document.getElementById('camaraSalida');
+                
+                if (data.camaras.length === 0) {
+                    statusDiv.innerHTML = '<span class="camara-chip">No se detectaron camaras</span>';
+                } else {
+                    statusDiv.innerHTML = data.camaras.map(c => 
+                        `<span class="camara-chip">Camara ${c.indice}</span>`
+                    ).join('');
+                    
+                    entradaSel.innerHTML = '<option value="-1">Sin asignar</option>';
+                    salidaSel.innerHTML = '<option value="-1">Sin asignar</option>';
+                    
+                    data.camaras.forEach(c => {
+                        entradaSel.innerHTML += `<option value="${c.indice}">Camara ${c.indice}</option>`;
+                        salidaSel.innerHTML += `<option value="${c.indice}">Camara ${c.indice}</option>`;
+                    });
+                    
+                    if (data.camaras.length > 0) entradaSel.value = 0;
+                    if (data.camaras.length > 1) salidaSel.value = 1;
+                }
+            } catch(e) { console.error(e); }
+        }
+        
+        async function iniciarCamaras() {
+            const entrada = parseInt(document.getElementById('camaraEntrada').value);
+            const salida = parseInt(document.getElementById('camaraSalida').value);
+            
+            try {
+                const resp = await fetch('/api/camaras/configurar', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        entrada: entrada >= 0 ? entrada : null,
+                        salida: salida >= 0 ? salida : null
+                    })
+                });
+                const data = await resp.json();
+                
+                if (data.resultados.entrada || data.resultados.salida) {
+                    showAlert('Camaras iniciadas');
+                    actualizarVideos();
+                    actualizarEstado();
+                }
+            } catch(e) { showAlert('Error al iniciar camaras'); }
+        }
+        
+        async function detenerCamaras() {
+            try {
+                await fetch('/api/camaras/detener', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({tipo: 'todas'})
+                });
+                showAlert('Camaras detenidas');
+                actualizarVideos();
+            } catch(e) { console.error(e); }
+        }
+        
+        function cambiarVideo(tipo) {
+            videoActual = tipo;
+            document.querySelectorAll('.video-thumb').forEach(t => t.classList.remove('active'));
+            document.querySelector(`.video-thumb[onclick="cambiarVideo('${tipo}')"]`).classList.add('actual');
+            actualizarVideos();
+        }
+        
+        function actualizarVideos() {
+            const main = document.getElementById('videoMain');
+            const placeholder = document.getElementById('videoPlaceholder');
+            
+            if (document.getElementById('camaraEntrada').value >= 0 && videoActual === 'entrada') {
+                main.src = '/video_feed/entrada';
+                main.style.display = 'block';
+                placeholder.style.display = 'none';
+            } else if (document.getElementById('camaraSalida').value >= 0 && videoActual === 'salida') {
+                main.src = '/video_feed/salida';
+                main.style.display = 'block';
+                placeholder.style.display = 'none';
+            } else {
+                main.style.display = 'none';
+                placeholder.style.display = 'block';
+            }
+            
+            document.getElementById('thumbEntrada').src = '/video_feed/entrada?ts=' + Date.now();
+            document.getElementById('thumbSalida').src = '/video_feed/salida?ts=' + Date.now();
+        }
+        
+        async function actualizarEstado() {
+            try {
+                const resp = await fetch('/api/camaras/estado');
+                const data = await resp.json();
+                
+                const dot = document.getElementById('statusDot');
+                const text = document.getElementById('statusText');
+                
+                if (data.entrada.activa || data.salida.activa) {
+                    dot.classList.remove('inactive');
+                    text.textContent = 'Camaras activas';
+                } else {
+                    dot.classList.add('inactive');
+                    text.textContent = 'Sin camaras';
+                }
+            } catch(e) { console.error(e); }
+        }
+        
+        async function cargarSolicitudes() {
+            try {
+                const resp = await fetch('/api/solicitudes');
+                const data = await resp.json();
+                
+                const container = document.getElementById('solicitudesList');
+                document.getElementById('solicitudesCount').textContent = data.solicitudes.length;
+                
+                if (data.solicitudes.length === 0) {
+                    container.innerHTML = '<div class="empty-state">Sin solicitudes</div>';
+                    return;
+                }
+                
+                container.innerHTML = data.solicitudes.map(s => `
+                    <div class="card-item">
+                        <img src="${s.foto_path || ''}" class="card-foto" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 40 40%22><rect fill=%22%231a1a1a%22 width=%2240%22 height=%2240%22/><text fill=%22%23666%22 x=%2220%22 y=%2225%22 text-anchor=%22middle%22 font-size=%2215%22>👤</text></svg>'">
+                        <div class="card-info">
+                            <div class="card-nombre">${s.nombre_completo}</div>
+                            <div class="card-meta">
+                                <span>🏠${s.numero_casa}</span>
+                                <span class="card-tipo ${s.tipo}">${s.tipo}</span>
+                            </div>
+                        </div>
+                        <div style="display:flex;gap:4px;">
+                            <button class="btn btn-success" style="padding:4px 8px;font-size:0.65rem" onclick="aceptarSol(${s.id})">✓</button>
+                            <button class="btn btn-danger" style="padding:4px 8px;font-size:0.65rem" onclick="denegarSol(${s.id})">✗</button>
+                        </div>
+                    </div>
+                `).join('');
+            } catch(e) { console.error(e); }
+        }
+        
+        async function cargarUsuarios() {
+            try {
+                const resp = await fetch('/api/usuarios/activos');
+                const data = await resp.json();
+                
+                const container = document.getElementById('usuariosList');
+                document.getElementById('usuariosCount').textContent = data.usuarios.length;
+                
+                if (data.usuarios.length === 0) {
+                    container.innerHTML = '<div class="empty-state">Sin usuarios</div>';
+                    return;
+                }
+                
+                container.innerHTML = data.usuarios.map(u => `
+                    <div class="card-item">
+                        <img src="${u.foto_path || ''}" class="card-foto" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 40 40%22><rect fill=%22%231a1a1a%22 width=%2240%22 height=%2240%22/><text fill=%22%23666%22 x=%2220%22 y=%2225%22 text-anchor=%22middle%22 font-size=%2215%22>👤</text></svg>'">
+                        <div class="card-info">
+                            <div class="card-nombre">${u.nombre_completo}</div>
+                            <div class="card-meta">
+                                <span>ID:${u.id}</span>
+                                <span>🏠${u.numero_casa}</span>
+                                <span class="card-tipo ${u.tipo}">${u.tipo}</span>
+                            </div>
+                        </div>
+                        <button class="card-borrar" onclick="borrarUsuario('${u.id}')">🗑</button>
+                    </div>
+                `).join('');
+            } catch(e) { console.error(e); }
+        }
+        
+        async function cargarRegistros() {
+            try {
+                const tipo = document.getElementById('filtroTipo').value;
+                const accion = document.getElementById('filtroAccion').value;
+                
+                let url = '/api/registros?';
+                if (tipo) url += 'tipo=' + tipo + '&';
+                if (accion) url += 'accion=' + accion + '&';
+                
+                const resp = await fetch(url);
+                const data = await resp.json();
+                
+                const container = document.getElementById('registrosList');
+                
+                if (data.registros.length === 0) {
+                    container.innerHTML = '<div class="empty-state">Sin registros</div>';
+                    return;
+                }
+                
+                container.innerHTML = data.registros.map(r => `
+                    <div class="registro-row">
+                        <span class="registro-id">${r.usuario_id}</span>
+                        <span class="badge badge-${r.tipo_usuario} registro-tipo">${r.tipo_usuario}</span>
+                        <span class="registro-casa">🏠${r.numero_casa}</span>
+                        <span class="registro-fecha">${new Date(r.fecha_hora).toLocaleString('es-MX')}</span>
+                        <span class="accion-badge ${r.tipo_accion}">${r.tipo_accion}</span>
+                    </div>
+                `).join('');
+            } catch(e) { console.error(e); }
+        }
+        
+        async function aceptarSol(id) {
+            if (!confirm('Aceptar?')) return;
+            try {
+                await fetch('/api/solicitudes/' + id + '/aceptar', {method: 'POST'});
+                cargarSolicitudes();
+                cargarUsuarios();
+                cargarRegistros();
+            } catch(e) { showAlert('Error'); }
+        }
+        
+        async function denegarSol(id) {
+            if (!confirm('Denegar?')) return;
+            try {
+                await fetch('/api/solicitudes/' + id + '/denegar', {method: 'POST'});
+                cargarSolicitudes();
+            } catch(e) { showAlert('Error'); }
+        }
+        
+        async function borrarUsuario(id) {
+            if (!confirm('Eliminar usuario?')) return;
+            try {
+                await fetch('/api/usuarios/' + id + '/borrar', {method: 'POST'});
+                cargarUsuarios();
+            } catch(e) { showAlert('Error'); }
+        }
+        
+        detectarCamaras();
+        cargarSolicitudes();
+        cargarUsuarios();
+        cargarRegistros();
+        
+        setTimeout(() => {
+            const entrada = document.getElementById('camaraEntrada').value;
+            const salida = document.getElementById('camaraSalida').value;
+            if (entrada >= 0 || salida >= 0) {
+                iniciarCamaras();
+            }
+        }, 1000);
+        
+        setInterval(() => {
+            cargarRegistros();
+            cargarSolicitudes();
+            cargarUsuarios();
+            actualizarEstado();
+        }, 5000);
+    </script>
+</body>
+</html>

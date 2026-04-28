@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OmniGuard - Acceso del Guardia</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/estilos.css') }}">
+    <style>
+        .login-page {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: 
+                radial-gradient(ellipse at 30% 20%, rgba(201, 169, 98, 0.05) 0%, transparent 50%),
+                radial-gradient(ellipse at 70% 80%, rgba(201, 169, 98, 0.03) 0%, transparent 50%),
+                var(--bg-primary);
+        }
+        
+        .login-card {
+            width: 100%;
+            max-width: 420px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-xl);
+            padding: 48px 40px;
+            box-shadow: var(--shadow-lg);
+        }
+        
+        .login-header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        
+        .login-logo {
+            font-family: var(--font-title);
+            font-size: 1.6rem;
+            font-weight: 700;
+            letter-spacing: 3px;
+            color: var(--text-primary);
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+        
+        .login-logo span {
+            color: var(--accent);
+        }
+        
+        .login-subtitle {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+        
+        .login-form .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .login-form .btn {
+            width: 100%;
+            margin-top: 12px;
+        }
+        
+        .login-error {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid var(--danger);
+            color: var(--danger);
+            padding: 12px 16px;
+            border-radius: var(--radius);
+            margin-bottom: 20px;
+            font-size: 0.9rem;
+            display: none;
+        }
+        
+        .login-error.show {
+            display: block;
+        }
+        
+        .login-footer {
+            text-align: center;
+            margin-top: 24px;
+            padding-top: 24px;
+            border-top: 1px solid var(--border);
+            color: var(--text-muted);
+            font-size: 0.8rem;
+        }
+    </style>
+</head>
+<body class="login-page">
+    <div class="login-card">
+        <div class="login-header">
+            <div class="login-logo">OMNI<span>GUARD</span></div>
+            <p class="login-subtitle">Panel de Control del Guardia</p>
+        </div>
+        
+        {% if error %}
+        <div class="login-error show">{{ error }}</div>
+        {% endif %}
+        
+        <form class="login-form" method="POST" action="/login">
+            <div class="form-group">
+                <label class="form-label" for="username">Usuario</label>
+                <input type="text" id="username" name="username" class="form-input" 
+                       placeholder="Ingrese su usuario" required autocomplete="username">
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label" for="password">Contraseña</label>
+                <input type="password" id="password" name="password" class="form-input" 
+                       placeholder="Ingrese su contraseña" required autocomplete="current-password">
+            </div>
+            
+            <button type="submit" class="btn btn-primary btn-lg">
+                Iniciar Sesión
+            </button>
+        </form>
+        
+        <div class="login-footer">
+            <p>Sistema de Seguridad Inteligente</p>
+            <p>&copy; 2026 OmniGuard Residential AI</p>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OmniGuard - Registro de Usuario</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/estilos.css') }}">
+</head>
+<body>
+    <header class="header">
+        <div class="container">
+            <div class="logo">OMNI<span>GUARD</span></div>
+            <nav>
+                <ul class="nav-links">
+                    <li><a href="/">Inicio</a></li>
+                    <li><a href="/registro">Registro</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <main class="hero">
+        <div class="form-container">
+            <h1 class="form-title">Registro de Usuario</h1>
+            <p class="form-subtitle">Complete el formulario para solicitar acceso al fraccionamiento</p>
+
+            <div id="mensaje"></div>
+
+            <form id="registroForm" enctype="multipart/form-data">
+                <div class="form-group">
+                    <label class="form-label" for="nombre_completo">Nombre Completo</label>
+                    <input type="text" id="nombre_completo" name="nombre_completo" class="form-input" 
+                           placeholder="Ingrese su nombre completo" required minlength="3">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" for="numero_casa">Número de Casa</label>
+                    <input type="number" id="numero_casa" name="numero_casa" class="form-input" 
+                           placeholder="Ej: 42" min="1" max="999" required>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" for="tipo">Tipo de Usuario</label>
+                    <select id="tipo" name="tipo" class="form-select" required>
+                        <option value="">Seleccione una opción</option>
+                        <option value="residente">Residente</option>
+                        <option value="visitante">Visitante</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Foto del Rostro</label>
+                    <div class="file-upload">
+                        <input type="file" id="foto" name="foto" accept="image/jpeg,image/jpg,image/png" required>
+                        <div class="file-upload-icon">📷</div>
+                        <div class="file-upload-text">
+                            <strong>Click para subir</strong> o arrastre su foto<br>
+                            JPG, PNG - Máx 10MB
+                        </div>
+                    </div>
+                    <div id="preview-container" style="display:none; margin-top: 16px; text-align: center;">
+                        <img id="preview" style="max-width: 150px; border-radius: 8px; border: 2px solid var(--border);">
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-primary btn-lg" style="width: 100%;">
+                    Enviar Solicitud
+                </button>
+            </form>
+
+            <p style="text-align: center; margin-top: 24px; color: var(--text-secondary); font-size: 0.85rem;">
+                Su solicitud será revisada por seguridad. Recibirá acceso una vez aprobada.
+            </p>
+        </div>
+    </main>
+
+    <footer class="footer">
+        <div class="container">
+            <p>&copy; 2026 OmniGuard Residential AI. Sistema de Seguridad Inteligente.</p>
+        </div>
+    </footer>
+
+    <script>
+        const registroForm = document.getElementById('registroForm');
+        const mensajeDiv = document.getElementById('mensaje');
+        const fotoInput = document.getElementById('foto');
+        const previewContainer = document.getElementById('preview-container');
+        const previewImg = document.getElementById('preview');
+
+        fotoInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    previewImg.src = e.target.result;
+                    previewContainer.style.display = 'block';
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        registroForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            mensajeDiv.innerHTML = '<div class="alert"><div class="spinner" style="width: 20px; height: 20px; border-width: 2px;"></div> Enviando solicitud...</div>';
+            mensajeDiv.className = 'fade-in';
+
+            const formData = new FormData(registroForm);
+
+            try {
+                const response = await fetch('/api/registro', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    mensajeDiv.innerHTML = '<div class="alert alert-success">✓ ' + data.message + '</div>';
+                    mensajeDiv.className = 'fade-in';
+                    registroForm.reset();
+                    previewContainer.style.display = 'none';
+                    
+                    setTimeout(() => {
+                        mensajeDiv.innerHTML = '';
+                    }, 5000);
+                } else {
+                    mensajeDiv.innerHTML = '<div class="alert alert-error">✗ ' + data.message + '</div>';
+                    mensajeDiv.className = 'fade-in';
+                }
+            } catch (error) {
+                mensajeDiv.innerHTML = '<div class="alert alert-error">✗ Error de conexión. Intente de nuevo.</div>';
+                mensajeDiv.className = 'fade-in';
+            }
+        });
+    </script>
+</body>
+</html>
