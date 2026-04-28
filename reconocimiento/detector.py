@@ -73,12 +73,12 @@ class DetectorRostro:
             rostros = self.face_cascade.detectMultiScale(gris, 1.1, 4)
             if len(rostros) > 0:
                 x, y, w, h = rostros[0]
-                return (y, x + w, y + h, x, 0.85)
+                return (x, y, x + w, y + h, 0.85)
             return None
         except:
             return None
     
-    def extraer_embedding_opencv(self, caja_rostro):
+    def extraer_embedding_opencv(self, imagen, caja_rostro):
         try:
             x1, y1, x2, y2 = caja_rostro
             rostro = imagen[y1:y2, x1:x2]
@@ -109,7 +109,7 @@ class DetectorRostro:
         if resultado is None:
             return None, 0.0
         top, left, bottom, right, confianza = resultado
-        embedding = self.extraer_embedding_opencv((left, top, right, bottom))
+        embedding = self.extraer_embedding_opencv(imagen, (left, top, right, bottom))
         if embedding is None:
             return None, 0.0
         mejor_coincidencia = None

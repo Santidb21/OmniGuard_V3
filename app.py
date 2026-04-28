@@ -20,6 +20,7 @@ from models import (
     obtener_embedding, get_db_connection, guardar_embedding
 )
 from reconocimiento.registros import exportar_registros_mensuales
+from reconocimiento.detector import obtener_detector, iniciar_deteccion
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -41,6 +42,18 @@ CAMARAS_ACTIVAS = {
     'entrada': False,
     'salida': False
 }
+
+detector_inicializado = False
+
+def inicializar_sistema():
+    global detector_inicializado
+    detectar_camaras()
+    ok = iniciar_deteccion()
+    detector_inicializado = ok
+    if ok:
+        print("[INFO] Detector facial inicializado")
+    else:
+        print("[WARN] Detector facial no disponible")
 
 def detectar_camaras():
     camaras = []
@@ -127,48 +140,52 @@ def extraer_embedding_imagen(image_path):
         return None
 
 def generar_frames_video(tipo_camara):
-    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+    detector = obtener_detector()
     frame_count = 0
-    
+
     while CAMARAS_ACTIVAS.get(tipo_camara, False):
         if CAPTURAS.get(tipo_camara) is None:
             time.sleep(0.5)
             continue
-        
+
         try:
             ret, frame = CAPTURAS[tipo_camara].read()
         except Exception as e:
             print("[ERROR] Leyendo frame de camara {}: {}".format(tipo_camara, e))
             break
-        
+
         if not ret:
             time.sleep(0.1)
             continue
-        
+
         try:
             frame_count += 1
-            
-            if frame_count % 30 == 0:
-                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                faces = face_cascade.detectMultiScale(gray, 1.1, 4)
-                
-                for (x, y, w, h) in faces:
-                    cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-            
-            cv2.putText(frame, "Camara: {}".format(tipo_camara.upper()), (10, 30), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-            cv2.putText(frame, "OMNIGUARD", (10, 60), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (201, 169, 98), 2)
-            
+
+            if frame_count % 10 == 0:
+                usuario_id, confianza = detector.reconocer_usuario(frame)
+                if usuario_id:
+                    detector.procesar_deteccion(usuario_id, confianza)
+                    usuario = obtener_usuario_por_id(usuario_id)
+                    if usuario:
+                        x, y, w, h = (50, 50, 100, 100)
+                        cv2.rectangle(frame, (50, 50), (150, 150), (201, 169, 98), 2)
+                        cv2.putText(frame, "{} ({:.0f}%)".format(usuario['nombre_completo'], confianza * 100),
+                                    (50, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (201, 169, 98), 2)
+
+            cv2.putText(frame, "{} | {}".format(tipo_camara.upper(), datetime.now().strftime('%H:%M:%S')),
+                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            cv2.putText(frame, "OMNIGUARD", (10, 55),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (201, 169, 98), 1)
+
             ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
             frame_bytes = buffer.tobytes()
-            
+
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
         except Exception as e:
             print("[ERROR] Generando frame: {}".format(e))
             break
-    
+
     print("[INFO] Stream de camara {} terminado".format(tipo_camara))
 
 def iniciar_camara(tipo_camara, indice):
@@ -181,6 +198,9 @@ def iniciar_camara(tipo_camara, indice):
         if CAPTURAS[tipo_camara].isOpened():
             CONFIG_CAMARAS[tipo_camara] = indice
             CAMARAS_ACTIVAS[tipo_camara] = True
+            detector = obtener_detector()
+            if detector:
+                detector.actualizar_cache()
             print("[INFO] Camara {} iniciada en indice {}".format(tipo_camara, indice))
             return True
         else:
@@ -460,7 +480,7 @@ def servir_foto(filename):
     return send_from_directory(Config.FOTOS_PATH, filename)
 
 if __name__ == '__main__':
-    detectar_camaras()
+    inicializar_sistema()
     
     print("=" * 50)
     print("  OMNIGUARD RESIDENTIAL AI")
