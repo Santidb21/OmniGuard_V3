@@ -2,9 +2,6 @@ import os
 import sys
 import time
 import warnings
-os.environ['FACE_RECOGNITION_SKIP_DOWNLOAD'] = '1'
-sys.modules['face_recognition'] = None
-
 import sqlite3
 import cv2
 import numpy as np
@@ -13,9 +10,6 @@ from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_from_directory, Response
 from werkzeug.utils import secure_filename
 from flask_cors import CORS
-
-FACE_RECOGNITION_DISPONIBLE = False
-face_recognition = None
 
 from config import Config
 from models import (
@@ -26,29 +20,11 @@ from models import (
     obtener_embedding, get_db_connection, guardar_embedding
 )
 from reconocimiento.registros import exportar_registros_mensuales
-from reconocimiento.detector import detector, iniciar_deteccion
 
 app = Flask(__name__)
 app.config.from_object(Config)
 CORS(app)
-
 app.secret_key = Config.SECRET_KEY
-
-import sys
-import os
-
-face_recognition = None
-FACE_RECOGNITION_DISPONIBLE = False
-
-os.environ['FACE_RECOGNITION_SKIP_DOWNLOAD'] = '1'
-
-import warnings
-with warnings.catch_warnings():
-    warnings.simplefilter("ignore")
-    try:
-        from reconocimiento import detector as det
-    except:
-        pass
 
 CONFIG_CAMARAS = {
     'entrada': 0,
@@ -65,16 +41,6 @@ CAMARAS_ACTIVAS = {
     'entrada': False,
     'salida': False
 }
-
-def detectar_camaras():
-    camaras = []
-    for i in range(5):
-        cap = cv2.VideoCapture(i)
-        if cap.isOpened():
-            camaras.append(i)
-            cap.release()
-    CONFIG_CAMARAS['detectadas'] = camaras
-    return camaras
 
 def detectar_camaras():
     camaras = []
@@ -133,15 +99,15 @@ def verificar_mes_nuevo():
             conn.commit()
         conn.close()
     except Exception as e:
-        print(f"[ERROR] Verificando mes nuevo: {e}")
+        print("[ERROR] Verificando mes nuevo: {}".format(e))
 
 def verificar_visitantes_expirados():
     try:
         eliminados = eliminar_visitantes_expirados()
         if eliminados > 0:
-            print(f"[INFO] Se eliminaron {eliminados} visitantes expirados")
+            print("[INFO] Se eliminaron {} visitantes expirados".format(eliminados))
     except Exception as e:
-        print(f"[ERROR] Verificando visitantes: {e}")
+        print("[ERROR] Verificando visitantes: {}".format(e))
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in Config.ALLOWED_EXTENSIONS
@@ -157,28 +123,22 @@ def extraer_embedding_imagen(image_path):
         embedding = embedding / (np.linalg.norm(embedding) + 1e-6)
         return embedding.astype(np.float32).tobytes()
     except Exception as e:
-        print(f"[ERROR] Extrayendo embedding: {e}")
+        print("[ERROR] Extrayendo embedding: {}".format(e))
         return None
 
 def generar_frames_video(tipo_camara):
     face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
     frame_count = 0
-    max_intentos = 10
-    intentos = 0
     
     while CAMARAS_ACTIVAS.get(tipo_camara, False):
         if CAPTURAS.get(tipo_camara) is None:
-            if intentos < max_intentos:
-                intentos += 1
-                time.sleep(0.5)
-                continue
-            else:
-                break
-            
+            time.sleep(0.5)
+            continue
+        
         try:
             ret, frame = CAPTURAS[tipo_camara].read()
         except Exception as e:
-            print(f"[ERROR] Leyendo frame de camara {tipo_camara}: {e}")
+            print("[ERROR] Leyendo frame de camara {}: {}".format(tipo_camara, e))
             break
         
         if not ret:
@@ -188,26 +148,14 @@ def generar_frames_video(tipo_camara):
         try:
             frame_count += 1
             
-            if frame_count % 3 == 0:
+            if frame_count % 30 == 0:
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 faces = face_cascade.detectMultiScale(gray, 1.1, 4)
                 
                 for (x, y, w, h) in faces:
                     cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-                
-                if frame_count % 30 == 0:
-                    try:
-                        usuario_id, confianza = detector.reconocer_usuario(frame)
-                        if usuario_id:
-                            tipo_accion = 'entrada' if tipo_camara == 'entrada' else 'salida'
-                            usuario = obtener_usuario_por_id(usuario_id)
-                            if usuario:
-                                registrar_entrada_salida(usuario_id, usuario['tipo'], usuario['numero_casa'], tipo_accion, round(confianza*100, 2))
-                                print(f"[{tipo_accion.upper()}] {usuario['nombre_completo']} - Confianza: {confianza*100:.1f}%")
-                    except Exception as e:
-                        print(f"[ERROR] Reconociendo usuario: {e}")
             
-            cv2.putText(frame, f"Camara: {tipo_camara.upper()}", (10, 30), 
+            cv2.putText(frame, "Camara: {}".format(tipo_camara.upper()), (10, 30), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
             cv2.putText(frame, "OMNIGUARD", (10, 60), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (201, 169, 98), 2)
@@ -218,10 +166,10 @@ def generar_frames_video(tipo_camara):
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
         except Exception as e:
-            print(f"[ERROR] Generando frame: {e}")
+            print("[ERROR] Generando frame: {}".format(e))
             break
     
-    print(f"[INFO] Stream de camara {tipo_camara} terminado")
+    print("[INFO] Stream de camara {} terminado".format(tipo_camara))
 
 def iniciar_camara(tipo_camara, indice):
     try:
@@ -233,13 +181,13 @@ def iniciar_camara(tipo_camara, indice):
         if CAPTURAS[tipo_camara].isOpened():
             CONFIG_CAMARAS[tipo_camara] = indice
             CAMARAS_ACTIVAS[tipo_camara] = True
-            print(f"[INFO] Camara {tipo_camara} iniciada en indice {indice}")
+            print("[INFO] Camara {} iniciada en indice {}".format(tipo_camara, indice))
             return True
         else:
-            print(f"[ERROR] No se pudo abrir camara {tipo_camara}")
+            print("[ERROR] No se pudo abrir camara {}".format(tipo_camara))
             return False
     except Exception as e:
-        print(f"[ERROR] Iniciando camara: {e}")
+        print("[ERROR] Iniciando camara: {}".format(e))
         return False
 
 def detener_camara(tipo_camara):
@@ -248,10 +196,10 @@ def detener_camara(tipo_camara):
         if CAPTURAS.get(tipo_camara):
             CAPTURAS[tipo_camara].release()
             CAPTURAS[tipo_camara] = None
-        print(f"[INFO] Camara {tipo_camara} detenida")
+        print("[INFO] Camara {} detenida".format(tipo_camara))
         return True
     except Exception as e:
-        print(f"[ERROR] Deteniendo camara: {e}")
+        print("[ERROR] Deteniendo camara: {}".format(e))
         return False
 
 @app.route('/')
@@ -294,9 +242,9 @@ def video_feed(tipo):
 @app.route('/api/camaras/detectar', methods=['GET'])
 @login_requerido
 def api_detectar_camaras():
-    camaras = detectar_cameras()
+    camaras = detectar_camaras()
     return jsonify({
-        'camaras': [{'indice': i, 'nombre': f'Camara {i}'} for i in camaras],
+        'camaras': [{'indice': i, 'nombre': 'Camara {}'.format(i)} for i in camaras],
         'config': CONFIG_CAMARAS
     })
 
@@ -365,20 +313,20 @@ def api_registro():
         
         filename = secure_filename(foto.filename) if foto.filename else "foto.jpg"
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        nombre_archivo = f"{timestamp}_{filename}"
+        nombre_archivo = "{}_{}".format(timestamp, filename)
         filepath = os.path.join(Config.FOTOS_PATH, nombre_archivo)
         foto.save(filepath)
         
         embedding = extraer_embedding_imagen(filepath)
-        user_id = crear_solicitud(nombre_completo, numero_casa, tipo, f"/static/fotos/{nombre_archivo}", embedding)
+        user_id = crear_solicitud(nombre_completo, numero_casa, tipo, "/static/fotos/{}".format(nombre_archivo), embedding)
         
         return jsonify({
             'success': True,
-            'message': f'Solicitud enviada correctamente. Su ID es: {user_id}. Espere aprobacion.',
+            'message': 'Solicitud enviada correctamente. Su ID es: {}. Espere aprobacion.'.format(user_id),
             'user_id': user_id
         })
     except Exception as e:
-        print(f"[ERROR] Registro API: {e}")
+        print("[ERROR] Registro API: {}".format(e))
         return jsonify({'success': False, 'message': 'Error del servidor'})
 
 @app.route('/api/solicitudes', methods=['GET'])
@@ -486,16 +434,13 @@ def api_usuarios_activos():
 @login_requerido
 def api_usuario_borrar(usuario_id):
     try:
-        from models import obtener_usuario_por_id
-        import os
-        
         usuario = obtener_usuario_por_id(usuario_id)
         if usuario and usuario['foto_path']:
             foto_archivo = os.path.basename(usuario['foto_path'])
             ruta_foto = os.path.join(Config.FOTOS_PATH, foto_archivo)
             if os.path.exists(ruta_foto):
                 os.remove(ruta_foto)
-                print(f"[INFO] Foto eliminada: {foto_archivo}")
+                print("[INFO] Foto eliminada: {}".format(foto_archivo))
         
         dar_de_baja_usuario(usuario_id, eliminar=True)
         return jsonify({'success': True, 'message': 'Usuario eliminado'})
@@ -510,26 +455,24 @@ def api_test():
         'timestamp': datetime.now().isoformat()
     })
 
-@app.route('/static/fotos/')
+@app.route('/static/fotos/<filename>')
 def servir_foto(filename):
     return send_from_directory(Config.FOTOS_PATH, filename)
 
 if __name__ == '__main__':
     detectar_camaras()
-    iniciar_deteccion()
     
     print("=" * 50)
     print("  OMNIGUARD RESIDENTIAL AI")
     print("  Sistema de Seguridad Inteligente")
     print("=" * 50)
-    print("  Face Recognition: " + ("ACTIVO" if FACE_RECOGNITION_DISPONIBLE else "INACTIVO (OpenCV)"))
-    print("  Camaras detectadas: " + str(CONFIG_CAMARAS['detectadas']))
+    print("  Camaras detectadas: {}".format(CONFIG_CAMARAS['detectadas']))
     print("\n" + "=" * 50)
-    print("  Servidor: http://localhost:" + str(Config.PORT))
-    print("  Registro: http://localhost:" + str(Config.PORT) + "/registro")
-    print("  Panel Guardia: http://localhost:" + str(Config.PORT) + "/login")
-    print("   Usuario: " + Config.ADMIN_USERNAME)
-    print("   Contrasena: " + Config.ADMIN_PASSWORD)
+    print("  Servidor: http://localhost:{}".format(Config.PORT))
+    print("  Registro: http://localhost:{}/registro".format(Config.PORT))
+    print("  Panel Guardia: http://localhost:{}/login".format(Config.PORT))
+    print("   Usuario: {}".format(Config.ADMIN_USERNAME))
+    print("   Contrasena: {}".format(Config.ADMIN_PASSWORD))
     print("\n" + "=" * 50)
     
     app.run(host=Config.HOST, port=Config.PORT, debug=Config.DEBUG)
