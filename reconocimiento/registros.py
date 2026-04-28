@@ -6,6 +6,7 @@ from config import Config
 from models import get_db_connection
 
 def verificar_cambio_mes():
+    """Verifica si ha cambiado el mes para exportar registros"""
     try:
         mes_actual = datetime.now().strftime("%B_%Y")
         return mes_actual
@@ -14,6 +15,7 @@ def verificar_cambio_mes():
         return None
 
 def exportar_registros_mensuales():
+    """Exporta los registros del mes actual a un archivo SQLite separado"""
     try:
         os.makedirs(Config.REGISTROS_PATH, exist_ok=True)
         
@@ -24,9 +26,11 @@ def exportar_registros_mensuales():
             print(f"[INFO] Registros de {mes_nombre} ya exportados")
             return True
         
+        # Conectar a BD principal
         conn_origen = get_db_connection()
         cursor_origen = conn_origen.cursor()
         
+        # Obtener todos los registros
         cursor_origen.execute("SELECT * FROM registros_entrada_salida")
         registros = cursor_origen.fetchall()
         
@@ -35,9 +39,11 @@ def exportar_registros_mensuales():
             conn_origen.close()
             return True
         
+        # Crear BD mensual
         conn_destino = sqlite3.connect(archivo_mes)
         cursor_destino = conn_destino.cursor()
         
+        # Crear tabla en BD mensual
         cursor_destino.execute('''
             CREATE TABLE IF NOT EXISTS registros_entrada_salida (
                 id INTEGER PRIMARY KEY,
@@ -50,6 +56,7 @@ def exportar_registros_mensuales():
             )
         ''')
         
+        # Copiar registros
         for registro in registros:
             cursor_destino.execute('''
                 INSERT INTO registros_entrada_salida 
@@ -71,6 +78,7 @@ def exportar_registros_mensuales():
         return False
 
 def limpiar_registros_viejos():
+    """Limpia registros antiguos manteniendo solo el último por usuario por día"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -84,6 +92,7 @@ def limpiar_registros_viejos():
         print(f"[ERROR] Limpiando registros: {e}")
 
 def obtener_registros_mes(mes, anio):
+    """Obtiene registros de un mes/año específico"""
     try:
         archivo = os.path.join(Config.REGISTROS_PATH, f"{mes}_{anio}.db")
         
@@ -91,6 +100,7 @@ def obtener_registros_mes(mes, anio):
             return []
         
         conn = sqlite3.connect(archivo)
+        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM registros_entrada_salida ORDER BY fecha_hora DESC")
         registros = cursor.fetchall()
@@ -102,6 +112,7 @@ def obtener_registros_mes(mes, anio):
         return []
 
 def listar_archivos_mensuales():
+    """Lista todos los archivos de registros mensuales"""
     try:
         if not os.path.exists(Config.REGISTROS_PATH):
             return []
