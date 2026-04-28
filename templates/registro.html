@@ -49,18 +49,28 @@
                 </div>
 
                 <div class="form-group">
-                    <label class="form-label">Foto del Rostro</label>
+                    <label class="form-label">Fotos del Rostro</label>
                     <div class="file-upload">
-                        <input type="file" id="foto" name="foto" accept="image/jpeg,image/jpg,image/png" required>
+                        <input type="file" id="foto" name="fotos" accept="image/jpeg,image/jpg,image/png" multiple>
                         <div class="file-upload-icon">📷</div>
                         <div class="file-upload-text">
-                            <strong>Click para subir</strong> o arrastre su foto<br>
+                            <strong>Click para subir</strong> o arrastre sus fotos<br>
                             JPG, PNG - Máx 10MB
                         </div>
                     </div>
                     <div id="preview-container" style="display:none; margin-top: 16px; text-align: center;">
-                        <img id="preview" style="max-width: 150px; border-radius: 8px; border: 2px solid var(--border);">
+                        <div id="preview-list" style="display:flex; gap:10px; flex-wrap:wrap; justify-content:center;"></div>
                     </div>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px;">
+                        <button type="button" class="btn" id="abrirCamaraBtn">Abrir camara</button>
+                        <button type="button" class="btn" id="capturarBtn" style="display:none;">Capturar</button>
+                        <button type="button" class="btn" id="limpiarFotosBtn" style="display:none;">Limpiar fotos</button>
+                    </div>
+                    <video id="registroVideo" autoplay playsinline muted style="display:none; width:100%; max-height:260px; object-fit:cover; margin-top:12px; border-radius:8px; border:1px solid var(--border);"></video>
+                    <canvas id="registroCanvas" style="display:none;"></canvas>
+                    <p style="margin-top: 10px; color: var(--text-secondary); font-size: 0.8rem;">
+                        Para mejor reconocimiento use varias fotos claras: una de frente y dos con leve giro.
+                    </p>
                 </div>
 
                 <button type="submit" class="btn btn-primary btn-lg" style="width: 100%;">
@@ -85,18 +95,89 @@
         const mensajeDiv = document.getElementById('mensaje');
         const fotoInput = document.getElementById('foto');
         const previewContainer = document.getElementById('preview-container');
-        const previewImg = document.getElementById('preview');
+        const previewList = document.getElementById('preview-list');
+        const abrirCamaraBtn = document.getElementById('abrirCamaraBtn');
+        const capturarBtn = document.getElementById('capturarBtn');
+        const limpiarFotosBtn = document.getElementById('limpiarFotosBtn');
+        const registroVideo = document.getElementById('registroVideo');
+        const registroCanvas = document.getElementById('registroCanvas');
+        let capturasCamara = [];
+        let streamRegistro = null;
 
-        fotoInput.addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            if (file) {
+        function crearPreview(src) {
+            const img = document.createElement('img');
+            img.src = src;
+            img.style.width = '92px';
+            img.style.height = '92px';
+            img.style.objectFit = 'cover';
+            img.style.borderRadius = '8px';
+            img.style.border = '2px solid var(--border)';
+            previewList.appendChild(img);
+        }
+
+        function renderPreviews() {
+            const files = Array.from(fotoInput.files || []);
+            previewList.innerHTML = '';
+            previewContainer.style.display = (files.length || capturasCamara.length) ? 'block' : 'none';
+            limpiarFotosBtn.style.display = (files.length || capturasCamara.length) ? 'inline-flex' : 'none';
+
+            files.forEach(function(file) {
                 const reader = new FileReader();
-                reader.onload = function(e) {
-                    previewImg.src = e.target.result;
-                    previewContainer.style.display = 'block';
-                };
+                reader.onload = function(e) { crearPreview(e.target.result); };
                 reader.readAsDataURL(file);
+            });
+
+            capturasCamara.forEach(function(file) {
+                crearPreview(URL.createObjectURL(file));
+            });
+        }
+
+        fotoInput.addEventListener('change', function() {
+            const total = Array.from(fotoInput.files || []).length + capturasCamara.length;
+            if (total > 5) {
+                mensajeDiv.innerHTML = '<div class="alert alert-error">Seleccione maximo 5 fotos.</div>';
+                fotoInput.value = '';
             }
+            renderPreviews();
+        });
+
+        abrirCamaraBtn.addEventListener('click', async function() {
+            try {
+                streamRegistro = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+                    audio: false
+                });
+                registroVideo.srcObject = streamRegistro;
+                registroVideo.style.display = 'block';
+                capturarBtn.style.display = 'inline-flex';
+            } catch (error) {
+                mensajeDiv.innerHTML = '<div class="alert alert-error">No se pudo abrir la camara del navegador.</div>';
+            }
+        });
+
+        capturarBtn.addEventListener('click', function() {
+            const total = Array.from(fotoInput.files || []).length + capturasCamara.length;
+            if (total >= 5) {
+                mensajeDiv.innerHTML = '<div class="alert alert-error">Maximo 5 fotos por solicitud.</div>';
+                return;
+            }
+            if (!registroVideo.videoWidth || !registroVideo.videoHeight) return;
+
+            registroCanvas.width = registroVideo.videoWidth;
+            registroCanvas.height = registroVideo.videoHeight;
+            const ctx = registroCanvas.getContext('2d');
+            ctx.drawImage(registroVideo, 0, 0, registroCanvas.width, registroCanvas.height);
+            registroCanvas.toBlob(function(blob) {
+                if (!blob) return;
+                capturasCamara.push(new File([blob], 'captura_' + Date.now() + '.jpg', { type: 'image/jpeg' }));
+                renderPreviews();
+            }, 'image/jpeg', 0.9);
+        });
+
+        limpiarFotosBtn.addEventListener('click', function() {
+            fotoInput.value = '';
+            capturasCamara = [];
+            renderPreviews();
         });
 
         registroForm.addEventListener('submit', async function(e) {
@@ -106,6 +187,18 @@
             mensajeDiv.className = 'fade-in';
 
             const formData = new FormData(registroForm);
+            capturasCamara.forEach(function(file) {
+                formData.append('fotos', file);
+            });
+            const totalFotos = formData.getAll('fotos').filter(Boolean).length;
+            if (totalFotos === 0) {
+                mensajeDiv.innerHTML = '<div class="alert alert-error">Agregue al menos una foto del rostro.</div>';
+                return;
+            }
+            if (totalFotos > 5) {
+                mensajeDiv.innerHTML = '<div class="alert alert-error">Use maximo 5 fotos.</div>';
+                return;
+            }
 
             try {
                 const response = await fetch('/api/registro', {
@@ -119,7 +212,9 @@
                     mensajeDiv.innerHTML = '<div class="alert alert-success">✓ ' + data.message + '</div>';
                     mensajeDiv.className = 'fade-in';
                     registroForm.reset();
+                    capturasCamara = [];
                     previewContainer.style.display = 'none';
+                    previewList.innerHTML = '';
                     
                     setTimeout(() => {
                         mensajeDiv.innerHTML = '';

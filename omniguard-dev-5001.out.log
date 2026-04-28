@@ -1,0 +1,18 @@
+[INFO] Cache facial: 3 usuarios, 3 muestras
+[INFO] Detector facial inicializado
+==================================================
+  OMNIGUARD RESIDENTIAL AI
+  Sistema de Seguridad Inteligente
+==================================================
+  Camaras detectadas: [0, 1]
+
+==================================================
+  Servidor: http://localhost:5001
+  Registro: http://localhost:5001/registro
+  Panel Guardia: http://localhost:5001/login
+   Usuario: guardia
+   Contrasena: admin123
+
+==================================================
+ * Serving Flask app 'app'
+ * Debug mode: off

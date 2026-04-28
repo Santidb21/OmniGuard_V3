@@ -266,6 +266,19 @@ def obtener_ultimo_registro():
     conn.close()
     return resultado
 
+def obtener_ultimo_registro_usuario(usuario_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT * FROM registros_entrada_salida
+        WHERE usuario_id = ?
+        ORDER BY fecha_hora DESC, id DESC
+        LIMIT 1
+    """, (usuario_id,))
+    resultado = cursor.fetchone()
+    conn.close()
+    return resultado
+
 def obtener_registros(limite=100):
     conn = get_db_connection()
     cursor = conn.cursor()

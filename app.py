@@ -3,6 +3,7 @@ import sys
 import time
 import warnings
 import sqlite3
+import threading
 import cv2
 import numpy as np
 from datetime import datetime
@@ -38,12 +39,67 @@ CAPTURAS = {
     'salida': None
 }
 
+CAPTURA_LOCKS = {
+    'entrada': None,
+    'salida': None
+}
+
+CAMERA_BACKENDS = {
+    'entrada': None,
+    'salida': None
+}
+
+CAMERAS_INFO = {}
+
 CAMARAS_ACTIVAS = {
     'entrada': False,
     'salida': False
 }
 
 detector_inicializado = False
+
+BACKENDS_CAMARA = [
+    ('AUTO', cv2.CAP_ANY),
+    ('DSHOW', cv2.CAP_DSHOW),
+    ('MSMF', cv2.CAP_MSMF)
+]
+
+def configurar_captura(cap):
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    cap.set(cv2.CAP_PROP_FPS, 15)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+def leer_frame_valido(cap, intentos=8):
+    for _ in range(intentos):
+        ret, frame = cap.read()
+        if ret and frame is not None and frame.size > 0:
+            return True, frame
+        time.sleep(0.08)
+    return False, None
+
+def nombre_backend(cap, fallback):
+    try:
+        return cap.getBackendName()
+    except Exception:
+        return fallback
+
+def abrir_captura(indice):
+    indice = int(indice)
+    for etiqueta, backend in BACKENDS_CAMARA:
+        cap = cv2.VideoCapture(indice, backend)
+        if not cap.isOpened():
+            cap.release()
+            continue
+
+        configurar_captura(cap)
+        ok, frame = leer_frame_valido(cap)
+        if ok:
+            return cap, nombre_backend(cap, etiqueta), frame
+
+        cap.release()
+
+    return None, None, None
 
 def inicializar_sistema():
     global detector_inicializado
@@ -56,13 +112,50 @@ def inicializar_sistema():
         print("[WARN] Detector facial no disponible")
 
 def detectar_camaras():
+    global CAMERAS_INFO
     camaras = []
-    for i in range(5):
-        cap = cv2.VideoCapture(i)
-        if cap.isOpened():
-            camaras.append(i)
-            cap.release()
-    CONFIG_CAMARAS['detectadas'] = camaras
+    camaras_info = {}
+    indices_activos = set()
+
+    for tipo in ['entrada', 'salida']:
+        if CAMARAS_ACTIVAS.get(tipo) and CONFIG_CAMARAS.get(tipo) is not None:
+            indice = int(CONFIG_CAMARAS[tipo])
+            indices_activos.add(indice)
+            info = {
+                'indice': indice,
+                'nombre': 'Camara {} ({})'.format(indice, tipo),
+                'backend': CAMERA_BACKENDS.get(tipo) or 'activa',
+                'activa': True,
+                'asignada': tipo
+            }
+            camaras.append(info)
+            camaras_info[indice] = info
+
+    for i in range(4):
+        if i in indices_activos:
+            continue
+
+        cap, backend, frame = abrir_captura(i)
+        if cap is None:
+            continue
+
+        alto, ancho = frame.shape[:2]
+        cap.release()
+
+        info = {
+            'indice': i,
+            'nombre': 'Camara {}'.format(i),
+            'backend': backend,
+            'activa': False,
+            'asignada': None,
+            'resolucion': '{}x{}'.format(ancho, alto)
+        }
+        camaras.append(info)
+        camaras_info[i] = info
+
+    camaras.sort(key=lambda c: c['indice'])
+    CONFIG_CAMARAS['detectadas'] = [c['indice'] for c in camaras]
+    CAMERAS_INFO = camaras_info
     return camaras
 
 def login_requerido(f):
@@ -125,23 +218,36 @@ def verificar_visitantes_expirados():
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in Config.ALLOWED_EXTENSIONS
 
-def extraer_embedding_imagen(image_path):
+def extraer_embeddings_imagenes(image_paths):
     try:
-        img = cv2.imread(image_path)
-        if img is None:
-            return None
-        gris = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        cara = cv2.resize(gris, (150, 150))
-        embedding = np.mean(cara, axis=0).flatten()
-        embedding = embedding / (np.linalg.norm(embedding) + 1e-6)
-        return embedding.astype(np.float32).tobytes()
+        detector = obtener_detector()
+        if not detector.inicializado:
+            iniciar_deteccion()
+
+        embeddings = []
+        for image_path in image_paths:
+            embeddings.extend(detector.extraer_embeddings_de_archivo(image_path))
+
+        return detector.serializar_embeddings(embeddings), len(embeddings)
     except Exception as e:
         print("[ERROR] Extrayendo embedding: {}".format(e))
-        return None
+        return None, 0
+
+def leer_frame_camara(tipo_camara):
+    cap = CAPTURAS.get(tipo_camara)
+    if cap is None:
+        return False, None
+    lock = CAPTURA_LOCKS.get(tipo_camara)
+    if lock is None:
+        return cap.read()
+    with lock:
+        return cap.read()
 
 def generar_frames_video(tipo_camara):
     detector = obtener_detector()
     frame_count = 0
+    ultimo_analisis = 0
+    ultimo_resultado = None
 
     while CAMARAS_ACTIVAS.get(tipo_camara, False):
         if CAPTURAS.get(tipo_camara) is None:
@@ -149,7 +255,7 @@ def generar_frames_video(tipo_camara):
             continue
 
         try:
-            ret, frame = CAPTURAS[tipo_camara].read()
+            ret, frame = leer_frame_camara(tipo_camara)
         except Exception as e:
             print("[ERROR] Leyendo frame de camara {}: {}".format(tipo_camara, e))
             break
@@ -161,16 +267,35 @@ def generar_frames_video(tipo_camara):
         try:
             frame_count += 1
 
-            if frame_count % 10 == 0:
-                usuario_id, confianza = detector.reconocer_usuario(frame)
+            ahora = time.time()
+            if ahora - ultimo_analisis >= 0.35:
+                ultimo_analisis = ahora
+                resultado = detector.analizar_frame(frame)
+                if resultado.get('rostro') is not None:
+                    resultado['ts'] = ahora
+                    ultimo_resultado = resultado
+
+                    usuario_id = resultado.get('usuario_id')
+                    confianza = resultado.get('confianza', 0.0)
+                    if usuario_id:
+                        detector.procesar_deteccion(usuario_id, confianza, tipo_camara)
+
+            if ultimo_resultado and ahora - ultimo_resultado.get('ts', 0) <= 1.2:
+                x1, y1, x2, y2 = ultimo_resultado['rostro']
+                usuario_id = ultimo_resultado.get('usuario_id')
+                confianza = ultimo_resultado.get('confianza', 0.0)
                 if usuario_id:
-                    detector.procesar_deteccion(usuario_id, confianza)
                     usuario = obtener_usuario_por_id(usuario_id)
-                    if usuario:
-                        x, y, w, h = (50, 50, 100, 100)
-                        cv2.rectangle(frame, (50, 50), (150, 150), (201, 169, 98), 2)
-                        cv2.putText(frame, "{} ({:.0f}%)".format(usuario['nombre_completo'], confianza * 100),
-                                    (50, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (201, 169, 98), 2)
+                    etiqueta = "{} ({:.0f}%)".format(usuario['nombre_completo'], confianza * 100) if usuario else "Usuario {}".format(usuario_id)
+                    color = (80, 220, 120)
+                else:
+                    etiqueta = "Rostro detectado"
+                    color = (40, 180, 255)
+
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                cv2.rectangle(frame, (x1, max(0, y1 - 26)), (min(frame.shape[1], x1 + 260), y1), color, -1)
+                cv2.putText(frame, etiqueta, (x1 + 6, max(18, y1 - 8)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (20, 20, 20), 1, cv2.LINE_AA)
 
             cv2.putText(frame, "{} | {}".format(tipo_camara.upper(), datetime.now().strftime('%H:%M:%S')),
                         (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
@@ -190,25 +315,58 @@ def generar_frames_video(tipo_camara):
 
 def iniciar_camara(tipo_camara, indice):
     try:
+        indice = int(indice)
+        otro_tipo = 'salida' if tipo_camara == 'entrada' else 'entrada'
+        if CAMARAS_ACTIVAS.get(otro_tipo) and CONFIG_CAMARAS.get(otro_tipo) == indice:
+            print("[WARN] Camara {} ya esta usando el indice {}".format(otro_tipo, indice))
+            return {
+                'ok': False,
+                'indice': indice,
+                'message': 'La camara {} ya esta asignada a {}'.format(indice, otro_tipo)
+            }
+
         if CAPTURAS.get(tipo_camara):
             CAPTURAS[tipo_camara].release()
+            CAPTURAS[tipo_camara] = None
         
-        CAPTURAS[tipo_camara] = cv2.VideoCapture(indice)
-        
-        if CAPTURAS[tipo_camara].isOpened():
+        captura, backend, frame = abrir_captura(indice)
+
+        if captura is not None:
+            CAPTURAS[tipo_camara] = captura
+            CAPTURA_LOCKS[tipo_camara] = CAPTURA_LOCKS.get(tipo_camara) or threading.Lock()
+            CAMERA_BACKENDS[tipo_camara] = backend
             CONFIG_CAMARAS[tipo_camara] = indice
             CAMARAS_ACTIVAS[tipo_camara] = True
             detector = obtener_detector()
             if detector:
                 detector.actualizar_cache()
-            print("[INFO] Camara {} iniciada en indice {}".format(tipo_camara, indice))
-            return True
-        else:
-            print("[ERROR] No se pudo abrir camara {}".format(tipo_camara))
-            return False
+            alto, ancho = frame.shape[:2]
+            print("[INFO] Camara {} iniciada en indice {} con backend {}".format(tipo_camara, indice, backend))
+            return {
+                'ok': True,
+                'indice': indice,
+                'backend': backend,
+                'resolucion': '{}x{}'.format(ancho, alto),
+                'message': 'Camara {} iniciada'.format(tipo_camara)
+            }
+
+        CAMARAS_ACTIVAS[tipo_camara] = False
+        CAPTURAS[tipo_camara] = None
+        CAPTURA_LOCKS[tipo_camara] = None
+        CAMERA_BACKENDS[tipo_camara] = None
+        print("[ERROR] No se pudo abrir camara {}".format(tipo_camara))
+        return {
+            'ok': False,
+            'indice': indice,
+            'message': 'No se pudo abrir la camara {}. Puede estar ocupada o sin permisos.'.format(indice)
+        }
     except Exception as e:
         print("[ERROR] Iniciando camara: {}".format(e))
-        return False
+        return {
+            'ok': False,
+            'indice': indice if 'indice' in locals() else None,
+            'message': str(e)
+        }
 
 def detener_camara(tipo_camara):
     try:
@@ -216,6 +374,8 @@ def detener_camara(tipo_camara):
         if CAPTURAS.get(tipo_camara):
             CAPTURAS[tipo_camara].release()
             CAPTURAS[tipo_camara] = None
+        CAPTURA_LOCKS[tipo_camara] = None
+        CAMERA_BACKENDS[tipo_camara] = None
         print("[INFO] Camara {} detenida".format(tipo_camara))
         return True
     except Exception as e:
@@ -255,8 +415,10 @@ def panel_guardia():
 @app.route('/video_feed/<tipo>')
 @login_requerido
 def video_feed(tipo):
-    if tipo in ['entrada', 'salida']:
+    if tipo in ['entrada', 'salida'] and CAMARAS_ACTIVAS.get(tipo) and CAPTURAS.get(tipo) is not None:
         return Response(generar_frames_video(tipo), mimetype='multipart/x-mixed-replace; boundary=frame')
+    if tipo in ['entrada', 'salida']:
+        return "Camara no activa", 409
     return "Tipo de camara invalido", 400
 
 @app.route('/api/camaras/detectar', methods=['GET'])
@@ -264,26 +426,46 @@ def video_feed(tipo):
 def api_detectar_camaras():
     camaras = detectar_camaras()
     return jsonify({
-        'camaras': [{'indice': i, 'nombre': 'Camara {}'.format(i)} for i in camaras],
-        'config': CONFIG_CAMARAS
+        'camaras': camaras,
+        'config': CONFIG_CAMARAS,
+        'estado': estado_camaras()
     })
 
 @app.route('/api/camaras/configurar', methods=['POST'])
 @login_requerido
 def api_configurar_camaras():
-    data = request.get_json()
+    data = request.get_json() or {}
     entrada = data.get('entrada')
     salida = data.get('salida')
     
-    resultados = {'entrada': False, 'salida': False}
+    resultados = {
+        'entrada': {'ok': False, 'message': 'Sin asignar'},
+        'salida': {'ok': False, 'message': 'Sin asignar'}
+    }
     
     if entrada is not None:
         resultados['entrada'] = iniciar_camara('entrada', entrada)
+    else:
+        detener_camara('entrada')
     
     if salida is not None:
-        resultados['salida'] = iniciar_camara('salida', salida)
+        if entrada is not None and salida == entrada:
+            resultados['salida'] = {
+                'ok': False,
+                'indice': salida,
+                'message': 'Entrada y salida no pueden usar el mismo dispositivo al mismo tiempo'
+            }
+        else:
+            resultados['salida'] = iniciar_camara('salida', salida)
+    else:
+        detener_camara('salida')
     
-    return jsonify({'success': True, 'resultados': resultados})
+    detectar_camaras()
+    return jsonify({
+        'success': resultados['entrada']['ok'] or resultados['salida']['ok'],
+        'resultados': resultados,
+        'estado': estado_camaras()
+    })
 
 @app.route('/api/camaras/detener', methods=['POST'])
 @login_requerido
@@ -302,11 +484,22 @@ def api_detener_camaras():
 @app.route('/api/camaras/estado', methods=['GET'])
 @login_requerido
 def api_estado_camaras():
-    return jsonify({
-        'entrada': {'activa': CAMARAS_ACTIVAS.get('entrada', False), 'indice': CONFIG_CAMARAS.get('entrada')},
-        'salida': {'activa': CAMARAS_ACTIVAS.get('salida', False), 'indice': CONFIG_CAMARAS.get('salida')},
+    return jsonify(estado_camaras())
+
+def estado_camaras():
+    return {
+        'entrada': {
+            'activa': CAMARAS_ACTIVAS.get('entrada', False),
+            'indice': CONFIG_CAMARAS.get('entrada'),
+            'backend': CAMERA_BACKENDS.get('entrada')
+        },
+        'salida': {
+            'activa': CAMARAS_ACTIVAS.get('salida', False),
+            'indice': CONFIG_CAMARAS.get('salida'),
+            'backend': CAMERA_BACKENDS.get('salida')
+        },
         'detectadas': CONFIG_CAMARAS.get('detectadas', [])
-    })
+    }
 
 @app.route('/api/registro', methods=['POST'])
 def api_registro():
@@ -314,7 +507,10 @@ def api_registro():
         nombre_completo = request.form.get('nombre_completo', '').strip()
         numero_casa = request.form.get('numero_casa', '').strip()
         tipo = request.form.get('tipo', '').strip()
-        foto = request.files.get('foto')
+        fotos = request.files.getlist('fotos')
+        if not fotos:
+            fotos = request.files.getlist('foto')
+        fotos = [foto for foto in fotos if foto and foto.filename]
         
         if not nombre_completo or len(nombre_completo) < 3:
             return jsonify({'success': False, 'message': 'Nombre invalido'})
@@ -325,24 +521,48 @@ def api_registro():
         if tipo not in ['residente', 'visitante']:
             return jsonify({'success': False, 'message': 'Tipo de usuario invalido'})
         
-        if not foto or foto.filename == '':
+        if not fotos:
             return jsonify({'success': False, 'message': 'Foto requerida'})
-        
-        if not allowed_file(foto.filename):
-            return jsonify({'success': False, 'message': 'Formato de imagen no permitido'})
-        
-        filename = secure_filename(foto.filename) if foto.filename else "foto.jpg"
+
+        if len(fotos) > 5:
+            return jsonify({'success': False, 'message': 'Suba maximo 5 fotos de entrenamiento'})
+
+        rutas_guardadas = []
+        nombres_guardados = []
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        nombre_archivo = "{}_{}".format(timestamp, filename)
-        filepath = os.path.join(Config.FOTOS_PATH, nombre_archivo)
-        foto.save(filepath)
-        
-        embedding = extraer_embedding_imagen(filepath)
-        user_id = crear_solicitud(nombre_completo, numero_casa, tipo, "/static/fotos/{}".format(nombre_archivo), embedding)
+
+        for idx, foto in enumerate(fotos, start=1):
+            if not allowed_file(foto.filename):
+                for ruta in rutas_guardadas:
+                    if os.path.exists(ruta):
+                        os.remove(ruta)
+                return jsonify({'success': False, 'message': 'Formato de imagen no permitido'})
+
+            filename = secure_filename(foto.filename) if foto.filename else "foto.jpg"
+            nombre_archivo = "{}_{}_{}".format(timestamp, idx, filename)
+            filepath = os.path.join(Config.FOTOS_PATH, nombre_archivo)
+            foto.save(filepath)
+            rutas_guardadas.append(filepath)
+            nombres_guardados.append(nombre_archivo)
+
+        embedding, muestras_validas = extraer_embeddings_imagenes(rutas_guardadas)
+        if embedding is None:
+            for ruta in rutas_guardadas:
+                if os.path.exists(ruta):
+                    os.remove(ruta)
+            return jsonify({'success': False, 'message': 'No se detecto un rostro claro en las fotos'})
+
+        user_id = crear_solicitud(
+            nombre_completo,
+            numero_casa,
+            tipo,
+            "/static/fotos/{}".format(nombres_guardados[0]),
+            embedding
+        )
         
         return jsonify({
             'success': True,
-            'message': 'Solicitud enviada correctamente. Su ID es: {}. Espere aprobacion.'.format(user_id),
+            'message': 'Solicitud enviada correctamente. Su ID es: {}. Muestras faciales validas: {}. Espere aprobacion.'.format(user_id, muestras_validas),
             'user_id': user_id
         })
     except Exception as e:
@@ -373,6 +593,9 @@ def api_solicitudes():
 def api_aceptar_solicitud(solicitud_id):
     try:
         aceptar_solicitud(solicitud_id)
+        detector = obtener_detector()
+        if detector:
+            detector.actualizar_cache()
         return jsonify({'success': True, 'message': 'Solicitud aceptada'})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
@@ -465,6 +688,61 @@ def api_usuario_borrar(usuario_id):
         dar_de_baja_usuario(usuario_id, eliminar=True)
         return jsonify({'success': True, 'message': 'Usuario eliminado'})
     except Exception as e:
+        return jsonify({'success': False, 'message': str(e)})
+
+@app.route('/api/usuarios/<usuario_id>/entrenar', methods=['POST'])
+@login_requerido
+def api_usuario_entrenar(usuario_id):
+    try:
+        usuario = obtener_usuario_por_id(usuario_id)
+        if not usuario:
+            return jsonify({'success': False, 'message': 'Usuario no encontrado'})
+
+        fotos = request.files.getlist('fotos')
+        if not fotos:
+            fotos = request.files.getlist('foto')
+        fotos = [foto for foto in fotos if foto and foto.filename]
+
+        if not fotos:
+            return jsonify({'success': False, 'message': 'Fotos requeridas'})
+        if len(fotos) > 5:
+            return jsonify({'success': False, 'message': 'Suba maximo 5 fotos'})
+
+        rutas_guardadas = []
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+        for idx, foto in enumerate(fotos, start=1):
+            if not allowed_file(foto.filename):
+                return jsonify({'success': False, 'message': 'Formato de imagen no permitido'})
+
+            filename = secure_filename(foto.filename) if foto.filename else "foto.jpg"
+            nombre_archivo = "{}_train_{}_{}_{}".format(timestamp, usuario_id, idx, filename)
+            filepath = os.path.join(Config.FOTOS_PATH, nombre_archivo)
+            foto.save(filepath)
+            rutas_guardadas.append(filepath)
+
+        embedding_blob, muestras_nuevas = extraer_embeddings_imagenes(rutas_guardadas)
+        if embedding_blob is None:
+            for ruta in rutas_guardadas:
+                if os.path.exists(ruta):
+                    os.remove(ruta)
+            return jsonify({'success': False, 'message': 'No se detecto un rostro claro en las fotos'})
+
+        detector = obtener_detector()
+        muestras_actuales = detector.deserializar_embeddings(obtener_embedding(usuario_id)) if detector else []
+        muestras_nuevas_lista = detector.deserializar_embeddings(embedding_blob) if detector else []
+        serializado = detector.serializar_embeddings(muestras_actuales + muestras_nuevas_lista)
+        guardar_embedding(usuario_id, serializado)
+        detector.actualizar_cache()
+
+        return jsonify({
+            'success': True,
+            'message': 'Entrenamiento actualizado',
+            'muestras_nuevas': muestras_nuevas,
+            'muestras_total': len(muestras_actuales) + len(muestras_nuevas_lista)
+        })
+    except Exception as e:
+        print("[ERROR] Entrenando usuario: {}".format(e))
         return jsonify({'success': False, 'message': str(e)})
 
 @app.route('/api/test', methods=['GET'])
