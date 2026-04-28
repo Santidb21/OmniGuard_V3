@@ -36,7 +36,7 @@ class Config:
     TIEMPO_SALIDA_MINUTOS = 30
 
 class DevelopmentConfig(Config):
-    DEBUG = True
+    DEBUG = False
 
 class ProductionConfig(Config):
     DEBUG = False

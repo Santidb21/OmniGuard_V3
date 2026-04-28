@@ -495,4 +495,4 @@ if __name__ == '__main__':
     print("   Contrasena: {}".format(Config.ADMIN_PASSWORD))
     print("\n" + "=" * 50)
     
-    app.run(host=Config.HOST, port=Config.PORT, debug=Config.DEBUG)
+    app.run(host=Config.HOST, port=Config.PORT, debug=False, use_reloader=False)
