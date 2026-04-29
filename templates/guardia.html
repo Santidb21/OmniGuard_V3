@@ -216,6 +216,8 @@
             font-size: 0.7rem;
             color: var(--text-secondary);
             display: flex;
+            flex-wrap: wrap;
+            align-items: center;
             gap: 6px;
         }
         
@@ -249,6 +251,48 @@
         .card-borrar:hover {
             background: var(--danger);
             color: white;
+        }
+
+        .card-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            align-items: stretch;
+        }
+
+        .card-actions button {
+            min-width: 74px;
+            padding: 5px 8px;
+            border-radius: var(--radius);
+            cursor: pointer;
+            font-size: 0.65rem;
+            white-space: nowrap;
+        }
+
+        .card-entrenar {
+            background: none;
+            border: 1px solid var(--accent);
+            color: var(--accent);
+            padding: 6px 8px;
+            border-radius: var(--radius);
+            cursor: pointer;
+            font-size: 0.65rem;
+            white-space: nowrap;
+        }
+
+        .card-entrenar:hover {
+            background: var(--accent);
+            color: var(--bg-primary);
+        }
+
+        .card-entrenar.camara {
+            border-color: var(--success);
+            color: var(--success);
+        }
+
+        .card-entrenar.camara:hover {
+            background: var(--success);
+            color: var(--bg-primary);
         }
         
         .registro-row {
@@ -678,20 +722,12 @@
                                 <span>ID:${u.id}</span>
                                 <span>🏠${u.numero_casa}</span>
                                 <span class="card-tipo ${u.tipo}">${u.tipo}</span>
+                                <button class="card-entrenar" onclick="entrenarUsuarioDesdeArchivo('${u.id}')">Subir fotos</button>
                             </div>
                         </div>
                         <button class="card-borrar" onclick="borrarUsuario('${u.id}')">🗑</button>
                     </div>
                 `).join('');
-                data.usuarios.forEach((u, index) => {
-                    const card = container.children[index];
-                    if (!card) return;
-                    const btn = document.createElement('button');
-                    btn.className = 'card-borrar';
-                    btn.textContent = 'Entrenar';
-                    btn.onclick = () => entrenarUsuario(u.id);
-                    card.appendChild(btn);
-                });
             } catch(e) { console.error(e); }
         }
         
@@ -752,11 +788,30 @@
             } catch(e) { showAlert('Error'); }
         }
 
-        function entrenarUsuario(id) {
+        function entrenarUsuarioDesdeArchivo(id) {
             usuarioEntrenamiento = id;
             const input = document.getElementById('entrenarFotosInput');
             input.value = '';
             input.click();
+        }
+
+        async function entrenarUsuarioDesdeCamara(id) {
+            try {
+                const resp = await fetch('/api/usuarios/' + id + '/entrenar/camara', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({tipo: videoActual})
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    showAlert('Foto tomada desde ' + data.camara + '. Agregada a confirmaciones. Muestras totales: ' + data.muestras_total);
+                    await cargarUsuarios();
+                } else {
+                    showAlert(data.message || 'No se pudo tomar la foto para entrenamiento');
+                }
+            } catch(e) {
+                showAlert('Error al entrenar desde camara');
+            }
         }
 
         document.getElementById('entrenarFotosInput').addEventListener('change', async function(e) {

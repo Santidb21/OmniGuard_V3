@@ -1,7 +1,6 @@
 import io
 import os
 import time
-from datetime import datetime
 
 import cv2
 import numpy as np
@@ -12,9 +11,9 @@ from models import (
     obtener_embedding,
     obtener_usuario_por_id,
     registrar_entrada_salida,
-    obtener_ultimo_registro,
     obtener_ultimo_registro_usuario,
     guardar_embedding,
+    ahora_cdmx,
 )
 
 
@@ -41,6 +40,7 @@ class DetectorRostro:
         self.usuarios_cache = []
         self.embeddings_cache = {}
         self.ultimo_ids_deteccion = {}
+        self.confirmaciones_deteccion = {}
         self.inicializado = False
         self.face_cascades = []
         self.hog = cv2.HOGDescriptor(
@@ -110,6 +110,7 @@ class DetectorRostro:
             usuarios = obtener_usuarios_aceptados()
             self.usuarios_cache = usuarios
             self.embeddings_cache = {}
+            self.confirmaciones_deteccion = {}
 
             for usuario in usuarios:
                 embeddings = self.deserializar_embeddings(obtener_embedding(usuario["id"]))
@@ -296,37 +297,110 @@ class DetectorRostro:
         except Exception:
             return 0.0
 
-    def analizar_frame(self, imagen):
+    def limpiar_confirmacion(self, contexto):
+        self.confirmaciones_deteccion.pop(contexto, None)
+
+    def confirmar_candidato(self, contexto, usuario_id, confianza):
+        requerido = max(1, int(Config.RECOGNITION_CONFIRM_FRAMES))
+        if requerido <= 1:
+            return True, 1
+
+        ahora = time.time()
+        ventana = max(0.5, float(Config.RECOGNITION_CONFIRM_WINDOW))
+        pendiente = self.confirmaciones_deteccion.get(contexto)
+
+        if (
+            pendiente
+            and pendiente["usuario_id"] == usuario_id
+            and ahora - pendiente["ultimo_ts"] <= ventana
+        ):
+            pendiente["conteo"] += 1
+            pendiente["ultimo_ts"] = ahora
+            pendiente["confianza"] = max(pendiente["confianza"], confianza)
+        else:
+            pendiente = {
+                "usuario_id": usuario_id,
+                "conteo": 1,
+                "ultimo_ts": ahora,
+                "confianza": confianza,
+            }
+            self.confirmaciones_deteccion[contexto] = pendiente
+
+        return pendiente["conteo"] >= requerido, pendiente["conteo"]
+
+    def analizar_frame(self, imagen, contexto="default"):
         if not self.inicializado:
             return {"rostro": None, "usuario_id": None, "confianza": 0.0}
 
         rostros = self.detectar_rostros_opencv(imagen)
         if not rostros:
+            self.limpiar_confirmacion(contexto)
             return {"rostro": None, "usuario_id": None, "confianza": 0.0}
 
         caja = rostros[0]
         embedding = self.extraer_embedding_opencv(imagen, caja)
         if embedding is None:
+            self.limpiar_confirmacion(contexto)
             return {"rostro": caja, "usuario_id": None, "confianza": 0.0}
 
         mejor_coincidencia = None
         mejor_confianza = 0.0
+        segunda_confianza = 0.0
         umbral = float(Config.CONFIDENCE_THRESHOLD)
+        margen_minimo = float(Config.RECOGNITION_MARGIN)
+        puntajes_usuario = []
 
         for usuario_id, muestras in self.embeddings_cache.items():
+            mejor_usuario = 0.0
             for embedding_guardado in muestras:
                 similitud = self.comparar_rostros(embedding, embedding_guardado)
-                if similitud > mejor_confianza:
-                    mejor_confianza = similitud
-                    mejor_coincidencia = usuario_id
+                mejor_usuario = max(mejor_usuario, similitud)
+            if mejor_usuario > 0:
+                puntajes_usuario.append((usuario_id, mejor_usuario))
 
-        if mejor_confianza < umbral:
-            mejor_coincidencia = None
+        puntajes_usuario.sort(key=lambda item: item[1], reverse=True)
+        if puntajes_usuario:
+            mejor_coincidencia, mejor_confianza = puntajes_usuario[0]
+        if len(puntajes_usuario) > 1:
+            segunda_confianza = puntajes_usuario[1][1]
+
+        margen = mejor_confianza - segunda_confianza
+        hay_segundo_candidato = len(puntajes_usuario) > 1
+        coincidencia_confiable = (
+            mejor_confianza >= umbral
+            and (not hay_segundo_candidato or margen >= margen_minimo)
+        )
+
+        if not coincidencia_confiable:
+            self.limpiar_confirmacion(contexto)
+            return {
+                "rostro": caja,
+                "usuario_id": None,
+                "confianza": mejor_confianza,
+                "segunda_confianza": segunda_confianza,
+                "margen": margen,
+                "estado": "sin_coincidencia" if mejor_confianza < umbral else "ambigua",
+            }
+
+        confirmado, conteo = self.confirmar_candidato(contexto, mejor_coincidencia, mejor_confianza)
+        if not confirmado:
+            return {
+                "rostro": caja,
+                "usuario_id": None,
+                "confianza": mejor_confianza,
+                "segunda_confianza": segunda_confianza,
+                "margen": margen,
+                "estado": "confirmando",
+                "confirmaciones": conteo,
+            }
 
         return {
             "rostro": caja,
             "usuario_id": mejor_coincidencia,
             "confianza": mejor_confianza,
+            "segunda_confianza": segunda_confianza,
+            "margen": margen,
+            "estado": "confirmada",
         }
 
     def reconocer_usuario(self, imagen):
@@ -334,51 +408,45 @@ class DetectorRostro:
         return resultado["usuario_id"], resultado["confianza"]
 
     def procesar_deteccion(self, usuario_id, confianza, tipo_accion=None):
-        ahora = datetime.now()
+        if confianza < float(Config.CONFIDENCE_THRESHOLD):
+            return False
+
+        ahora = ahora_cdmx().replace(tzinfo=None)
         tipo_forzado = tipo_accion in ("entrada", "salida")
         tipo_cache = (usuario_id, tipo_accion) if tipo_forzado else usuario_id
 
         if tipo_cache in self.ultimo_ids_deteccion:
             tiempo_ultimo = self.ultimo_ids_deteccion[tipo_cache]
             if (ahora - tiempo_ultimo).total_seconds() < 20:
-                return
+                return False
+
+        ultimo_usuario = obtener_ultimo_registro_usuario(usuario_id)
 
         if tipo_forzado:
-            ultimo = obtener_ultimo_registro_usuario(usuario_id)
-            if ultimo and ultimo["tipo_accion"] == tipo_accion:
-                try:
-                    fecha_ultimo = datetime.strptime(ultimo["fecha_hora"], "%Y-%m-%d %H:%M:%S")
-                    if (ahora - fecha_ultimo).total_seconds() < 60:
-                        return
-                except Exception:
-                    pass
+            if ultimo_usuario and ultimo_usuario["tipo_accion"] == tipo_accion:
+                return False
         else:
-            ultimo = obtener_ultimo_registro()
             tipo_accion = "entrada"
-            if ultimo and ultimo["usuario_id"] == usuario_id:
-                try:
-                    fecha_ultimo = datetime.strptime(ultimo["fecha_hora"], "%Y-%m-%d %H:%M:%S")
-                    tiempo_diff = ahora - fecha_ultimo
-                    if tiempo_diff.total_seconds() < (Config.TIEMPO_SALIDA_MINUTOS * 60):
-                        return
-                    if ultimo["tipo_accion"] == "entrada":
-                        tipo_accion = "salida"
-                except Exception:
-                    tipo_accion = "entrada"
+            if ultimo_usuario:
+                tipo_accion = "salida" if ultimo_usuario["tipo_accion"] == "entrada" else "entrada"
 
         if tipo_accion not in ("entrada", "salida"):
-            return
+            return False
 
         usuario = obtener_usuario_por_id(usuario_id)
         if usuario:
-            registrar_entrada_salida(
+            registrado = registrar_entrada_salida(
                 usuario_id,
                 usuario["tipo"],
                 usuario["numero_casa"],
                 tipo_accion,
                 round(confianza * 100, 2),
             )
-            self.ultimo_ids_deteccion[tipo_cache] = ahora
+            if registrado:
+                self.ultimo_ids_deteccion[tipo_cache] = ahora
+            return registrado
+
+        return False
 
 
 detector = DetectorRostro()

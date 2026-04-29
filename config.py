@@ -21,7 +21,10 @@ class Config:
     ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', 'guardia')
     ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'admin123')
     
-    CONFIDENCE_THRESHOLD = float(os.environ.get('CONFIDENCE_THRESHOLD', 0.60))
+    CONFIDENCE_THRESHOLD = float(os.environ.get('CONFIDENCE_THRESHOLD', 0.78))
+    RECOGNITION_MARGIN = float(os.environ.get('RECOGNITION_MARGIN', 0.08))
+    RECOGNITION_CONFIRM_FRAMES = int(os.environ.get('RECOGNITION_CONFIRM_FRAMES', 3))
+    RECOGNITION_CONFIRM_WINDOW = float(os.environ.get('RECOGNITION_CONFIRM_WINDOW', 2.0))
     DETECTION_INTERVAL = float(os.environ.get('DETECTION_INTERVAL', 2.0))
     
     FOTOS_PATH = os.path.join(BASE_DIR, 'static', 'fotos')

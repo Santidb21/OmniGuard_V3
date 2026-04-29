@@ -233,6 +233,26 @@ def extraer_embeddings_imagenes(image_paths):
         print("[ERROR] Extrayendo embedding: {}".format(e))
         return None, 0
 
+def actualizar_entrenamiento_usuario(usuario_id, rutas_guardadas):
+    embedding_blob, muestras_nuevas = extraer_embeddings_imagenes(rutas_guardadas)
+    if embedding_blob is None:
+        for ruta in rutas_guardadas:
+            if os.path.exists(ruta):
+                os.remove(ruta)
+        return None
+
+    detector = obtener_detector()
+    muestras_actuales = detector.deserializar_embeddings(obtener_embedding(usuario_id)) if detector else []
+    muestras_nuevas_lista = detector.deserializar_embeddings(embedding_blob) if detector else []
+    serializado = detector.serializar_embeddings(muestras_actuales + muestras_nuevas_lista)
+    guardar_embedding(usuario_id, serializado)
+    detector.actualizar_cache()
+
+    return {
+        'muestras_nuevas': muestras_nuevas,
+        'muestras_total': len(muestras_actuales) + len(muestras_nuevas_lista)
+    }
+
 def leer_frame_camara(tipo_camara):
     cap = CAPTURAS.get(tipo_camara)
     if cap is None:
@@ -273,7 +293,7 @@ def generar_frames_video(tipo_camara):
             ahora = time.time()
             if CAMARAS_ACTIVAS.get(tipo_camara, False) and ahora - ultimo_analisis >= 0.35:
                 ultimo_analisis = ahora
-                resultado = detector.analizar_frame(frame)
+                resultado = detector.analizar_frame(frame, tipo_camara)
                 if resultado.get('rostro') is not None:
                     resultado['ts'] = ahora
                     ultimo_resultado = resultado
@@ -724,28 +744,66 @@ def api_usuario_entrenar(usuario_id):
             foto.save(filepath)
             rutas_guardadas.append(filepath)
 
-        embedding_blob, muestras_nuevas = extraer_embeddings_imagenes(rutas_guardadas)
-        if embedding_blob is None:
-            for ruta in rutas_guardadas:
-                if os.path.exists(ruta):
-                    os.remove(ruta)
+        resultado = actualizar_entrenamiento_usuario(usuario_id, rutas_guardadas)
+        if resultado is None:
             return jsonify({'success': False, 'message': 'No se detecto un rostro claro en las fotos'})
-
-        detector = obtener_detector()
-        muestras_actuales = detector.deserializar_embeddings(obtener_embedding(usuario_id)) if detector else []
-        muestras_nuevas_lista = detector.deserializar_embeddings(embedding_blob) if detector else []
-        serializado = detector.serializar_embeddings(muestras_actuales + muestras_nuevas_lista)
-        guardar_embedding(usuario_id, serializado)
-        detector.actualizar_cache()
 
         return jsonify({
             'success': True,
             'message': 'Entrenamiento actualizado',
-            'muestras_nuevas': muestras_nuevas,
-            'muestras_total': len(muestras_actuales) + len(muestras_nuevas_lista)
+            'muestras_nuevas': resultado['muestras_nuevas'],
+            'muestras_total': resultado['muestras_total']
         })
     except Exception as e:
         print("[ERROR] Entrenando usuario: {}".format(e))
+        return jsonify({'success': False, 'message': str(e)})
+
+@app.route('/api/usuarios/<usuario_id>/entrenar/camara', methods=['POST'])
+@login_requerido
+def api_usuario_entrenar_camara(usuario_id):
+    try:
+        usuario = obtener_usuario_por_id(usuario_id)
+        if not usuario:
+            return jsonify({'success': False, 'message': 'Usuario no encontrado'})
+
+        data = request.get_json(silent=True) or {}
+        tipo_camara = data.get('tipo') if data.get('tipo') in ['entrada', 'salida'] else None
+        tipos_candidatos = [tipo_camara] if tipo_camara else []
+        tipos_candidatos.extend([tipo for tipo in ['entrada', 'salida'] if tipo not in tipos_candidatos])
+
+        frame = None
+        tipo_usado = None
+        for tipo in tipos_candidatos:
+            if CAMARAS_ACTIVAS.get(tipo) and CAPTURAS.get(tipo) is not None:
+                ok, frame_leido = leer_frame_camara(tipo)
+                if ok and frame_leido is not None and frame_leido.size > 0:
+                    frame = frame_leido
+                    tipo_usado = tipo
+                    break
+
+        if frame is None:
+            return jsonify({'success': False, 'message': 'No hay camara activa para tomar la foto'})
+
+        os.makedirs(Config.FOTOS_PATH, exist_ok=True)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        nombre_archivo = "{}_train_{}_camara_{}.jpg".format(timestamp, usuario_id, tipo_usado)
+        filepath = os.path.join(Config.FOTOS_PATH, nombre_archivo)
+        if not cv2.imwrite(filepath, frame):
+            return jsonify({'success': False, 'message': 'No se pudo guardar la foto de la camara'})
+
+        resultado = actualizar_entrenamiento_usuario(usuario_id, [filepath])
+        if resultado is None:
+            return jsonify({'success': False, 'message': 'No se detecto un rostro claro en la foto tomada'})
+
+        return jsonify({
+            'success': True,
+            'message': 'Foto tomada y entrenamiento actualizado',
+            'camara': tipo_usado,
+            'muestras_nuevas': resultado['muestras_nuevas'],
+            'muestras_total': resultado['muestras_total']
+        })
+    except Exception as e:
+        print("[ERROR] Entrenando usuario desde camara: {}".format(e))
         return jsonify({'success': False, 'message': str(e)})
 
 @app.route('/api/test', methods=['GET'])
