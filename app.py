@@ -250,6 +250,9 @@ def generar_frames_video(tipo_camara):
     ultimo_resultado = None
 
     while CAMARAS_ACTIVAS.get(tipo_camara, False):
+        if not CAMARAS_ACTIVAS.get(tipo_camara, False):
+            break
+
         if CAPTURAS.get(tipo_camara) is None:
             time.sleep(0.5)
             continue
@@ -268,7 +271,7 @@ def generar_frames_video(tipo_camara):
             frame_count += 1
 
             ahora = time.time()
-            if ahora - ultimo_analisis >= 0.35:
+            if CAMARAS_ACTIVAS.get(tipo_camara, False) and ahora - ultimo_analisis >= 0.35:
                 ultimo_analisis = ahora
                 resultado = detector.analizar_frame(frame)
                 if resultado.get('rostro') is not None:
@@ -277,7 +280,7 @@ def generar_frames_video(tipo_camara):
 
                     usuario_id = resultado.get('usuario_id')
                     confianza = resultado.get('confianza', 0.0)
-                    if usuario_id:
+                    if usuario_id and CAMARAS_ACTIVAS.get(tipo_camara, False):
                         detector.procesar_deteccion(usuario_id, confianza, tipo_camara)
 
             if ultimo_resultado and ahora - ultimo_resultado.get('ts', 0) <= 1.2:

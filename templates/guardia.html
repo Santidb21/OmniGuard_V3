@@ -453,11 +453,15 @@
             return detalles ? `${camara.nombre} (${detalles})` : camara.nombre;
         }
 
-        function actualizarActivacionCamaras() {
+        async function actualizarActivacionCamaras(aplicarServidor = true) {
             const entradaActiva = document.getElementById('activarEntrada').checked;
             const salidaActiva = document.getElementById('activarSalida').checked;
             document.getElementById('camaraEntrada').disabled = !entradaActiva;
             document.getElementById('camaraSalida').disabled = !salidaActiva;
+
+            if (aplicarServidor) {
+                await iniciarCamaras(false);
+            }
         }
         
         async function detectarCamaras() {
@@ -501,7 +505,7 @@
                 }
                 if (data.estado?.entrada?.activa) activarEntrada.checked = true;
                 if (data.estado?.salida?.activa) activarSalida.checked = true;
-                actualizarActivacionCamaras();
+                actualizarActivacionCamaras(false);
                 await actualizarEstado();
                 return camarasDetectadas;
             } catch(e) { console.error(e); }
@@ -531,6 +535,8 @@
                 const data = await resp.json();
                 const entradaOk = data.resultados?.entrada?.ok === true;
                 const salidaOk = data.resultados?.salida?.ok === true;
+                await detectarCamaras();
+                await actualizarVideos();
                 
                 if (entradaOk || salidaOk) {
                     if (mostrarAlerta) {
@@ -539,8 +545,6 @@
                             .map(r => `${r.message}${r.backend ? ' (' + r.backend + ')' : ''}`);
                         showAlert(mensajes.join('\n') || 'Camaras iniciadas');
                     }
-                    await detectarCamaras();
-                    await actualizarVideos();
                 } else {
                     const mensajes = [data.resultados?.entrada, data.resultados?.salida]
                         .filter(r => r && r.message && r.message !== 'Sin asignar')
