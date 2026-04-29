@@ -407,7 +407,7 @@ def detener_camara(tipo_camara):
 
 @app.route('/')
 def index():
-    return redirect(url_for('registro'))
+    return render_template('index.html')
 
 @app.route('/registro')
 def registro():

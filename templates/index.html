@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OmniGuard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/estilos.css') }}">
+    <style>
+        .home-page {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            background:
+                radial-gradient(ellipse at 50% 35%, rgba(201, 169, 98, 0.08) 0%, transparent 45%),
+                var(--bg-primary);
+        }
+
+        .home-header {
+            width: 100%;
+            padding: 28px 0;
+        }
+
+        .home-header .container {
+            justify-content: flex-end;
+        }
+
+        .home-nav {
+            display: flex;
+            align-items: center;
+            gap: 28px;
+            list-style: none;
+        }
+
+        .home-nav a {
+            color: var(--text-secondary);
+            font-family: var(--font-title);
+            font-size: 0.9rem;
+            font-weight: 600;
+            letter-spacing: 1px;
+            text-decoration: none;
+            text-transform: uppercase;
+            transition: var(--transition);
+        }
+
+        .home-nav a:hover {
+            color: var(--accent);
+        }
+
+        .home-main {
+            flex: 1;
+            display: grid;
+            place-items: center;
+            padding: 32px 20px 96px;
+        }
+
+        .home-logo {
+            font-family: var(--font-title);
+            font-size: clamp(3rem, 10vw, 8rem);
+            font-weight: 700;
+            letter-spacing: clamp(6px, 1.5vw, 18px);
+            line-height: 1;
+            color: var(--text-primary);
+            text-align: center;
+            text-transform: uppercase;
+        }
+
+        .home-logo span {
+            color: var(--accent);
+        }
+
+        @media (max-width: 640px) {
+            .home-header {
+                padding: 22px 0;
+            }
+
+            .home-header .container {
+                justify-content: center;
+            }
+
+            .home-nav {
+                gap: 22px;
+            }
+
+            .home-main {
+                padding-bottom: 72px;
+            }
+        }
+    </style>
+</head>
+<body class="home-page">
+    <header class="home-header">
+        <div class="container">
+            <nav aria-label="Navegacion principal">
+                <ul class="home-nav">
+                    <li><a href="{{ url_for('login') }}">Login</a></li>
+                    <li><a href="{{ url_for('registro') }}">Registro</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <main class="home-main">
+        <div class="home-logo" aria-label="OmniGuard">OMNI<span>GUARD</span></div>
+    </main>
+</body>
+</html>
