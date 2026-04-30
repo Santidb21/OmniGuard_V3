@@ -30,7 +30,7 @@ app.secret_key = Config.SECRET_KEY
 
 CONFIG_CAMARAS = {
     'entrada': 0,
-    'salida': 1,
+    'salida': None,
     'detectadas': []
 }
 
@@ -58,11 +58,16 @@ CAMARAS_ACTIVAS = {
 
 detector_inicializado = False
 
-BACKENDS_CAMARA = [
-    ('AUTO', cv2.CAP_ANY),
-    ('DSHOW', cv2.CAP_DSHOW),
-    ('MSMF', cv2.CAP_MSMF)
-]
+if os.name == 'nt':
+    BACKENDS_CAMARA = [
+        ('DSHOW', cv2.CAP_DSHOW),
+        ('MSMF', cv2.CAP_MSMF)
+    ]
+else:
+    BACKENDS_CAMARA = [
+        ('V4L2', cv2.CAP_V4L2),
+        ('AUTO', cv2.CAP_ANY)
+    ]
 
 def configurar_captura(cap):
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
