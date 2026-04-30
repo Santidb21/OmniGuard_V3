@@ -1,5 +1,6 @@
 import io
 import os
+import threading
 import time
 
 import cv2
@@ -18,19 +19,36 @@ from models import (
 
 
 face_recognition = None
+_face_rec_import_done = threading.Event()
+
+
+def _import_face_recognition_bg():
+    global face_recognition
+    try:
+        import face_recognition as fr
+        face_recognition = fr
+    except Exception:
+        face_recognition = None
+    finally:
+        _face_rec_import_done.set()
 
 
 def intentar_cargar_face_recognition():
     global face_recognition
     if face_recognition is not None:
         return face_recognition
-    try:
-        import face_recognition as fr
+    if _face_rec_import_done.is_set():
+        return face_recognition
 
-        face_recognition = fr
+    thread = threading.Thread(target=_import_face_recognition_bg, daemon=True)
+    thread.start()
+    ok = _face_rec_import_done.wait(timeout=8)
+
+    if ok and face_recognition is not None:
         print("[INFO] face_recognition (dlib) cargado")
-        return fr
-    except Exception:
+        return face_recognition
+    else:
+        print("[WARN] face_recognition no disponible (modelos no instalados o timeout), usando OpenCV como fallback")
         face_recognition = None
         return None
 
@@ -112,15 +130,41 @@ class DetectorRostro:
             self.embeddings_cache = {}
             self.confirmaciones_deteccion = {}
 
-            for usuario in usuarios:
-                embeddings = self.deserializar_embeddings(obtener_embedding(usuario["id"]))
-                embeddings = [e for e in embeddings if self.embedding_compatible(e)]
+            print("[DEBUG] feature_dim actual del detector: {}".format(self.feature_dim))
+            print("[DEBUG] Motor activo: {}".format("face_recognition (dlib)" if face_recognition else "OpenCV fallback"))
 
-                if not embeddings and usuario["foto_path"]:
+            for usuario in usuarios:
+                usuario_id = usuario["id"]
+                nombre = usuario["nombre_completo"]
+                foto_path = usuario["foto_path"]
+
+                embeddings_raw = self.deserializar_embeddings(obtener_embedding(usuario_id))
+                print("[DEBUG] Usuario '{}' (id={}): {} embeddings crudos en BD".format(
+                    nombre, usuario_id, len(embeddings_raw)))
+
+                if embeddings_raw:
+                    dims_unicos = set(e.size for e in embeddings_raw if e is not None)
+                    print("[DEBUG]   Dimensiones en BD: {}".format(dims_unicos))
+
+                embeddings = [e for e in embeddings_raw if self.embedding_compatible(e)]
+                incompatibles = len(embeddings_raw) - len(embeddings)
+                if incompatibles > 0:
+                    print("[DEBUG]   {} embeddings descartados (dim != {})".format(incompatibles, self.feature_dim))
+
+                if not embeddings and foto_path:
+                    print("[DEBUG]   Re-entrenando desde foto para usuario '{}'...".format(nombre))
                     embeddings = self.reentrenar_desde_foto_usuario(usuario)
+                    if embeddings:
+                        print("[DEBUG]   Re-entrenamiento exitoso: {} nuevos embeddings".format(len(embeddings)))
+                    else:
+                        print("[WARN] No se pudo re-entrenar al usuario '{}' desde su foto".format(nombre))
 
                 if embeddings:
-                    self.embeddings_cache[usuario["id"]] = embeddings
+                    self.embeddings_cache[usuario_id] = embeddings
+                    print("[DEBUG]   Usuario '{}' activo en cache con {} muestras (dim={})".format(
+                        nombre, len(embeddings), embeddings[0].size))
+                else:
+                    print("[WARN] Usuario '{}' SIN embeddings compatibles en cache".format(nombre))
 
             print("[INFO] Cache facial: {} usuarios, {} muestras".format(
                 len(self.embeddings_cache),
@@ -130,12 +174,13 @@ class DetectorRostro:
             print("[ERROR] Actualizando cache facial: {}".format(e))
 
     def embedding_compatible(self, embedding):
-        return (
-            embedding is not None
-            and embedding.ndim == 1
-            and self.feature_dim is not None
-            and embedding.size == self.feature_dim
-        )
+        if embedding is None:
+            return False
+        if embedding.ndim != 1:
+            return False
+        if self.feature_dim is None:
+            return False
+        return embedding.size == self.feature_dim
 
     def reentrenar_desde_foto_usuario(self, usuario):
         try:
@@ -161,6 +206,8 @@ class DetectorRostro:
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
         return clahe.apply(gris)
 
+    FACE_SIZE_ESTANDAR = (150, 150)
+
     def detectar_rostros_opencv(self, imagen):
         if not self.face_cascades:
             return []
@@ -168,20 +215,20 @@ class DetectorRostro:
         try:
             gris = self.preprocesar_gris(imagen)
             alto, ancho = gris.shape[:2]
-            min_lado = max(56, int(min(ancho, alto) * 0.14))
+            min_lado = max(30, int(min(ancho, alto) * 0.08))
             candidatos = []
 
             for cascade in self.face_cascades:
                 rostros = cascade.detectMultiScale(
                     gris,
-                    scaleFactor=1.05,
-                    minNeighbors=6,
+                    scaleFactor=1.1,
+                    minNeighbors=4,
                     minSize=(min_lado, min_lado),
                 )
                 for x, y, w, h in rostros:
                     aspecto = w / float(h)
                     area = w * h
-                    if 0.70 <= aspecto <= 1.35 and area >= min_lado * min_lado:
+                    if 0.60 <= aspecto <= 1.50 and area >= min_lado * min_lado:
                         candidatos.append((int(x), int(y), int(x + w), int(y + h)))
 
             return self.filtrar_rostros(candidatos)
@@ -234,7 +281,9 @@ class DetectorRostro:
             if rostro.size == 0:
                 return None
 
-            gris = self.preprocesar_gris(rostro)
+            rostro_normalizado = cv2.resize(rostro, self.FACE_SIZE_ESTANDAR, interpolation=cv2.INTER_AREA)
+
+            gris = self.preprocesar_gris(rostro_normalizado)
             gris_96 = cv2.resize(gris, (96, 96), interpolation=cv2.INTER_AREA)
             gris_64 = cv2.resize(gris, (64, 64), interpolation=cv2.INTER_AREA)
 
@@ -289,12 +338,23 @@ class DetectorRostro:
         return [embedding] if embedding is not None else []
 
     def comparar_rostros(self, embedding1, embedding2):
-        if not self.embedding_compatible(embedding1) or not self.embedding_compatible(embedding2):
+        compat1 = self.embedding_compatible(embedding1)
+        compat2 = self.embedding_compatible(embedding2)
+
+        if not compat1 or not compat2:
+            dim1 = embedding1.size if embedding1 is not None and hasattr(embedding1, 'size') else 'N/A'
+            dim2 = embedding2.size if embedding2 is not None and hasattr(embedding2, 'size') else 'N/A'
+            print("[DEBUG] comparar_rostros: INCOMPATIBLE - emb1 dim={} (compat={}) vs emb2 dim={} (compat={})".format(
+                dim1, compat1, dim2, compat2))
             return 0.0
+
         try:
             similitud = float(np.dot(embedding1, embedding2))
-            return max(0.0, min(1.0, similitud))
-        except Exception:
+            similitud = max(0.0, min(1.0, similitud))
+            print("[DEBUG] comparar_rostros: dim={}, similarity={:.4f}".format(embedding1.size, similitud))
+            return similitud
+        except Exception as e:
+            print("[DEBUG] comparar_rostros: EXCEPTION - {}".format(e))
             return 0.0
 
     def limpiar_confirmacion(self, contexto):
@@ -341,7 +401,11 @@ class DetectorRostro:
         embedding = self.extraer_embedding_opencv(imagen, caja)
         if embedding is None:
             self.limpiar_confirmacion(contexto)
+            print("[DEBUG] analizar_frame: rostro detectado pero embedding es None")
             return {"rostro": caja, "usuario_id": None, "confianza": 0.0}
+
+        print("[DEBUG] analizar_frame: embedding generado dim={}, norma={:.4f}".format(
+            embedding.size, np.linalg.norm(embedding)))
 
         mejor_coincidencia = None
         mejor_confianza = 0.0
@@ -350,6 +414,7 @@ class DetectorRostro:
         margen_minimo = float(Config.RECOGNITION_MARGIN)
         puntajes_usuario = []
 
+        print("[DEBUG] analizar_frame: comparando contra {} usuarios en cache".format(len(self.embeddings_cache)))
         for usuario_id, muestras in self.embeddings_cache.items():
             mejor_usuario = 0.0
             for embedding_guardado in muestras:
@@ -373,6 +438,9 @@ class DetectorRostro:
 
         if not coincidencia_confiable:
             self.limpiar_confirmacion(contexto)
+            print("[DEBUG] analizar_frame: SIN COINCIDENCIA - estado='{}', mejor={:.4f}, umbral={:.4f}".format(
+                "sin_coincidencia" if mejor_confianza < umbral else "ambigua",
+                mejor_confianza, umbral))
             return {
                 "rostro": caja,
                 "usuario_id": None,
@@ -384,6 +452,7 @@ class DetectorRostro:
 
         confirmado, conteo = self.confirmar_candidato(contexto, mejor_coincidencia, mejor_confianza)
         if not confirmado:
+            print("[DEBUG] analizar_frame: CONFIRMANDO ({}/{})".format(conteo, int(Config.RECOGNITION_CONFIRM_FRAMES)))
             return {
                 "rostro": caja,
                 "usuario_id": None,
@@ -393,6 +462,9 @@ class DetectorRostro:
                 "estado": "confirmando",
                 "confirmaciones": conteo,
             }
+
+        print("[DEBUG] analizar_frame: CONFIRMADA - usuario_id={}, confianza={:.4f}".format(
+            mejor_coincidencia, mejor_confianza))
 
         return {
             "rostro": caja,

@@ -21,7 +21,7 @@ class Config:
     ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', 'guardia')
     ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'admin123')
     
-    CONFIDENCE_THRESHOLD = float(os.environ.get('CONFIDENCE_THRESHOLD', 0.78))
+    CONFIDENCE_THRESHOLD = float(os.environ.get('CONFIDENCE_THRESHOLD', 0.70))  # NOTA: Umbral reducido por instrucción directiva. ATENCIÓN: Al usar el fallback de OpenCV (HOG+LBP), esto incrementa el riesgo de Falsos Positivos inter-persona (ver reporte_auditoria_reconocimiento.md).
     RECOGNITION_MARGIN = float(os.environ.get('RECOGNITION_MARGIN', 0.08))
     RECOGNITION_CONFIRM_FRAMES = int(os.environ.get('RECOGNITION_CONFIRM_FRAMES', 3))
     RECOGNITION_CONFIRM_WINDOW = float(os.environ.get('RECOGNITION_CONFIRM_WINDOW', 2.0))
