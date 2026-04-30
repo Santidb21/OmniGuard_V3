@@ -80,6 +80,26 @@
             padding: 8px 14px;
             font-size: 0.75rem;
         }
+
+        .camera-actions {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .camera-actions .btn {
+            width: 100%;
+            min-width: 0;
+            padding: 9px 8px;
+            font-size: 0.75rem;
+            white-space: nowrap;
+            text-align: center;
+        }
+
+        .camera-actions .btn-primary {
+            grid-column: 1 / -1;
+        }
         
         .camaras-status {
             display: flex;
@@ -196,6 +216,8 @@
             font-size: 0.7rem;
             color: var(--text-secondary);
             display: flex;
+            flex-wrap: wrap;
+            align-items: center;
             gap: 6px;
         }
         
@@ -229,6 +251,48 @@
         .card-borrar:hover {
             background: var(--danger);
             color: white;
+        }
+
+        .card-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            align-items: stretch;
+        }
+
+        .card-actions button {
+            min-width: 74px;
+            padding: 5px 8px;
+            border-radius: var(--radius);
+            cursor: pointer;
+            font-size: 0.65rem;
+            white-space: nowrap;
+        }
+
+        .card-entrenar {
+            background: none;
+            border: 1px solid var(--accent);
+            color: var(--accent);
+            padding: 6px 8px;
+            border-radius: var(--radius);
+            cursor: pointer;
+            font-size: 0.65rem;
+            white-space: nowrap;
+        }
+
+        .card-entrenar:hover {
+            background: var(--accent);
+            color: var(--bg-primary);
+        }
+
+        .card-entrenar.camara {
+            border-color: var(--success);
+            color: var(--success);
+        }
+
+        .card-entrenar.camara:hover {
+            background: var(--success);
+            color: var(--bg-primary);
         }
         
         .registro-row {
@@ -322,19 +386,26 @@
                 </div>
                 <div class="config-section">
                     <div class="config-row">
-                        <span class="config-label">Entrada:</span>
+                        <label class="config-label" style="display:flex;align-items:center;gap:6px;min-width:92px;">
+                            <input type="checkbox" id="activarEntrada" checked onchange="actualizarActivacionCamaras()">
+                            Entrada:
+                        </label>
                         <select class="form-select config-select" id="camaraEntrada">
                             <option value="-1">Sin asignar</option>
                         </select>
                     </div>
                     <div class="config-row">
-                        <span class="config-label">Salida:</span>
+                        <label class="config-label" style="display:flex;align-items:center;gap:6px;min-width:92px;">
+                            <input type="checkbox" id="activarSalida" onchange="actualizarActivacionCamaras()">
+                            Salida:
+                        </label>
                         <select class="form-select config-select" id="camaraSalida">
                             <option value="-1">Sin asignar</option>
                         </select>
                     </div>
-                    <div class="config-row">
+                    <div class="camera-actions">
                         <button class="btn btn-primary btn-config" onclick="iniciarCamaras()">Iniciar Cámaras</button>
+                        <button class="btn btn-config" onclick="detectarCamaras()">Actualizar</button>
                         <button class="btn btn-config" onclick="detenerCamaras()">Detener</button>
                     </div>
                 </div>
@@ -377,7 +448,7 @@
                             <span class="video-thumb-label">Entrada</span>
                         </div>
                         <div class="video-thumb" onclick="cambiarVideo('salida')">
-                            <img id="thumbSalida" src="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 60%22><rect fill=%22%231a1a1a%22 width=%22100%22 height=%2260%22/><text fill=%22%23666%22 x=%2250%22 y=%2230%22 text-anchor=%22middle%22 font-size=%2210%22>Salida</span></svg>'">
+                            <img id="thumbSalida" src="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 60%22><rect fill=%22%231a1a1a%22 width=%22100%22 height=%2260%22/><text fill=%22%23666%22 x=%2250%22 y=%2230%22 text-anchor=%22middle%22 font-size=%2210%22>Salida</text></svg>'">
                             <span class="video-thumb-label">Salida</span>
                         </div>
                     </div>
@@ -406,11 +477,36 @@
             </div>
         </div>
     </main>
+    <input type="file" id="entrenarFotosInput" accept="image/jpeg,image/jpg,image/png" multiple style="display:none;">
 
     <script>
         let videoActual = 'entrada';
+        let camarasDetectadas = [];
+        let usuarioEntrenamiento = null;
+        let primeraDeteccionCamaras = true;
         
         function showAlert(msg) { alert(msg); }
+
+        function placeholderCamara(label) {
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 60"><rect fill="#1a1a1a" width="100" height="60"/><text fill="#666" x="50" y="33" text-anchor="middle" font-size="10">${label}</text></svg>`;
+            return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+        }
+
+        function etiquetaCamara(camara) {
+            const detalles = [camara.backend, camara.resolucion].filter(Boolean).join(' - ');
+            return detalles ? `${camara.nombre} (${detalles})` : camara.nombre;
+        }
+
+        async function actualizarActivacionCamaras(aplicarServidor = true) {
+            const entradaActiva = document.getElementById('activarEntrada').checked;
+            const salidaActiva = document.getElementById('activarSalida').checked;
+            document.getElementById('camaraEntrada').disabled = !entradaActiva;
+            document.getElementById('camaraSalida').disabled = !salidaActiva;
+
+            if (aplicarServidor) {
+                await iniciarCamaras(false);
+            }
+        }
         
         async function detectarCamaras() {
             try {
@@ -420,47 +516,84 @@
                 const statusDiv = document.getElementById('camarasStatus');
                 const entradaSel = document.getElementById('camaraEntrada');
                 const salidaSel = document.getElementById('camaraSalida');
+                const activarEntrada = document.getElementById('activarEntrada');
+                const activarSalida = document.getElementById('activarSalida');
+                const entradaAnterior = entradaSel.value;
+                const salidaAnterior = salidaSel.value;
+
+                camarasDetectadas = data.camaras || [];
+                entradaSel.innerHTML = '<option value="-1">Sin asignar</option>';
+                salidaSel.innerHTML = '<option value="-1">Sin asignar</option>';
                 
-                if (data.camaras.length === 0) {
+                if (camarasDetectadas.length === 0) {
                     statusDiv.innerHTML = '<span class="camara-chip">No se detectaron camaras</span>';
                 } else {
-                    statusDiv.innerHTML = data.camaras.map(c => 
-                        `<span class="camara-chip">Camara ${c.indice}</span>`
+                    statusDiv.innerHTML = camarasDetectadas.map(c => 
+                        `<span class="camara-chip ${c.activa ? 'active' : ''}">${etiquetaCamara(c)}</span>`
                     ).join('');
                     
-                    entradaSel.innerHTML = '<option value="-1">Sin asignar</option>';
-                    salidaSel.innerHTML = '<option value="-1">Sin asignar</option>';
-                    
-                    data.camaras.forEach(c => {
-                        entradaSel.innerHTML += `<option value="${c.indice}">Camara ${c.indice}</option>`;
-                        salidaSel.innerHTML += `<option value="${c.indice}">Camara ${c.indice}</option>`;
+                    camarasDetectadas.forEach(c => {
+                        entradaSel.innerHTML += `<option value="${c.indice}">${etiquetaCamara(c)}</option>`;
+                        salidaSel.innerHTML += `<option value="${c.indice}">${etiquetaCamara(c)}</option>`;
                     });
                     
-                    if (data.camaras.length > 0) entradaSel.value = 0;
-                    if (data.camaras.length > 1) salidaSel.value = 1;
+                    const valores = camarasDetectadas.map(c => String(c.indice));
+                    entradaSel.value = valores.includes(entradaAnterior) ? entradaAnterior : String(camarasDetectadas[0].indice);
+                    salidaSel.value = valores.includes(salidaAnterior) ? salidaAnterior : (camarasDetectadas.length > 1 ? String(camarasDetectadas[1].indice) : '-1');
                 }
+
+                if (primeraDeteccionCamaras) {
+                    activarEntrada.checked = camarasDetectadas.length >= 1;
+                    activarSalida.checked = camarasDetectadas.length >= 2;
+                    primeraDeteccionCamaras = false;
+                }
+                if (data.estado?.entrada?.activa) activarEntrada.checked = true;
+                if (data.estado?.salida?.activa) activarSalida.checked = true;
+                actualizarActivacionCamaras(false);
+                await actualizarEstado();
+                return camarasDetectadas;
             } catch(e) { console.error(e); }
+            return [];
         }
         
-        async function iniciarCamaras() {
+        async function iniciarCamaras(mostrarAlerta = true) {
             const entrada = parseInt(document.getElementById('camaraEntrada').value);
             const salida = parseInt(document.getElementById('camaraSalida').value);
+            const activarEntrada = document.getElementById('activarEntrada').checked;
+            const activarSalida = document.getElementById('activarSalida').checked;
+
+            if (activarEntrada && activarSalida && entrada >= 0 && salida >= 0 && entrada === salida) {
+                if (mostrarAlerta) showAlert('Entrada y salida no pueden usar la misma camara al mismo tiempo.');
+                return;
+            }
             
             try {
                 const resp = await fetch('/api/camaras/configurar', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
-                        entrada: entrada >= 0 ? entrada : null,
-                        salida: salida >= 0 ? salida : null
+                        entrada: activarEntrada && entrada >= 0 ? entrada : null,
+                        salida: activarSalida && salida >= 0 ? salida : null
                     })
                 });
                 const data = await resp.json();
+                const entradaOk = data.resultados?.entrada?.ok === true;
+                const salidaOk = data.resultados?.salida?.ok === true;
+                await detectarCamaras();
+                await actualizarVideos();
                 
-                if (data.resultados.entrada || data.resultados.salida) {
-                    showAlert('Camaras iniciadas');
-                    actualizarVideos();
-                    actualizarEstado();
+                if (entradaOk || salidaOk) {
+                    if (mostrarAlerta) {
+                        const mensajes = [data.resultados.entrada, data.resultados.salida]
+                            .filter(r => r && r.ok)
+                            .map(r => `${r.message}${r.backend ? ' (' + r.backend + ')' : ''}`);
+                        showAlert(mensajes.join('\n') || 'Camaras iniciadas');
+                    }
+                } else {
+                    const mensajes = [data.resultados?.entrada, data.resultados?.salida]
+                        .filter(r => r && r.message && r.message !== 'Sin asignar')
+                        .map(r => r.message);
+                    if (mostrarAlerta) showAlert(mensajes.join('\n') || 'No se pudo iniciar ninguna camara. Revise que no este ocupada por otra aplicacion.');
                 }
             } catch(e) { showAlert('Error al iniciar camaras'); }
         }
@@ -473,36 +606,48 @@
                     body: JSON.stringify({tipo: 'todas'})
                 });
                 showAlert('Camaras detenidas');
-                actualizarVideos();
+                await detectarCamaras();
+                await actualizarVideos();
             } catch(e) { console.error(e); }
         }
         
         function cambiarVideo(tipo) {
             videoActual = tipo;
             document.querySelectorAll('.video-thumb').forEach(t => t.classList.remove('active'));
-            document.querySelector(`.video-thumb[onclick="cambiarVideo('${tipo}')"]`).classList.add('actual');
+            document.querySelector(`.video-thumb[onclick="cambiarVideo('${tipo}')"]`).classList.add('active');
             actualizarVideos();
         }
         
-        function actualizarVideos() {
-            const main = document.getElementById('videoMain');
-            const placeholder = document.getElementById('videoPlaceholder');
-            
-            if (document.getElementById('camaraEntrada').value >= 0 && videoActual === 'entrada') {
-                main.src = '/video_feed/entrada';
-                main.style.display = 'block';
-                placeholder.style.display = 'none';
-            } else if (document.getElementById('camaraSalida').value >= 0 && videoActual === 'salida') {
-                main.src = '/video_feed/salida';
-                main.style.display = 'block';
-                placeholder.style.display = 'none';
-            } else {
-                main.style.display = 'none';
-                placeholder.style.display = 'block';
+        async function actualizarVideos() {
+            try {
+                const main = document.getElementById('videoMain');
+                const placeholder = document.getElementById('videoPlaceholder');
+                const thumbEntrada = document.getElementById('thumbEntrada');
+                const thumbSalida = document.getElementById('thumbSalida');
+                const estadoResp = await fetch('/api/camaras/estado');
+                const estado = await estadoResp.json();
+                const entradaActiva = estado.entrada.activa;
+                const salidaActiva = estado.salida.activa;
+                
+                if (entradaActiva && videoActual === 'entrada') {
+                    main.src = '/video_feed/entrada?ts=' + Date.now();
+                    main.style.display = 'block';
+                    placeholder.style.display = 'none';
+                } else if (salidaActiva && videoActual === 'salida') {
+                    main.src = '/video_feed/salida?ts=' + Date.now();
+                    main.style.display = 'block';
+                    placeholder.style.display = 'none';
+                } else {
+                    main.removeAttribute('src');
+                    main.style.display = 'none';
+                    placeholder.style.display = 'block';
+                }
+                
+                thumbEntrada.src = entradaActiva && videoActual !== 'entrada' ? '/video_feed/entrada?ts=' + Date.now() : placeholderCamara('Entrada');
+                thumbSalida.src = salidaActiva && videoActual !== 'salida' ? '/video_feed/salida?ts=' + Date.now() : placeholderCamara('Salida');
+            } catch(e) {
+                console.error(e);
             }
-            
-            document.getElementById('thumbEntrada').src = '/video_feed/entrada?ts=' + Date.now();
-            document.getElementById('thumbSalida').src = '/video_feed/salida?ts=' + Date.now();
         }
         
         async function actualizarEstado() {
@@ -577,6 +722,7 @@
                                 <span>ID:${u.id}</span>
                                 <span>🏠${u.numero_casa}</span>
                                 <span class="card-tipo ${u.tipo}">${u.tipo}</span>
+                                <button class="card-entrenar" onclick="entrenarUsuarioDesdeArchivo('${u.id}')">Subir fotos</button>
                             </div>
                         </div>
                         <button class="card-borrar" onclick="borrarUsuario('${u.id}')">🗑</button>
@@ -641,19 +787,79 @@
                 cargarUsuarios();
             } catch(e) { showAlert('Error'); }
         }
+
+        function entrenarUsuarioDesdeArchivo(id) {
+            usuarioEntrenamiento = id;
+            const input = document.getElementById('entrenarFotosInput');
+            input.value = '';
+            input.click();
+        }
+
+        async function entrenarUsuarioDesdeCamara(id) {
+            try {
+                const resp = await fetch('/api/usuarios/' + id + '/entrenar/camara', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({tipo: videoActual})
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    showAlert('Foto tomada desde ' + data.camara + '. Agregada a confirmaciones. Muestras totales: ' + data.muestras_total);
+                    await cargarUsuarios();
+                } else {
+                    showAlert(data.message || 'No se pudo tomar la foto para entrenamiento');
+                }
+            } catch(e) {
+                showAlert('Error al entrenar desde camara');
+            }
+        }
+
+        document.getElementById('entrenarFotosInput').addEventListener('change', async function(e) {
+            const files = Array.from(e.target.files || []);
+            if (!usuarioEntrenamiento || files.length === 0) return;
+            if (files.length > 5) {
+                showAlert('Seleccione maximo 5 fotos.');
+                return;
+            }
+
+            const formData = new FormData();
+            files.forEach(file => formData.append('fotos', file));
+
+            try {
+                const resp = await fetch('/api/usuarios/' + usuarioEntrenamiento + '/entrenar', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    showAlert('Entrenamiento actualizado. Muestras totales: ' + data.muestras_total);
+                } else {
+                    showAlert(data.message || 'No se pudo entrenar el usuario');
+                }
+            } catch(e) {
+                showAlert('Error al entrenar usuario');
+            } finally {
+                usuarioEntrenamiento = null;
+                cargarUsuarios();
+            }
+        });
         
-        detectarCamaras();
-        cargarSolicitudes();
-        cargarUsuarios();
-        cargarRegistros();
-        
-        setTimeout(() => {
+        async function inicializarPanel() {
+            await detectarCamaras();
+            cargarSolicitudes();
+            cargarUsuarios();
+            cargarRegistros();
             const entrada = document.getElementById('camaraEntrada').value;
             const salida = document.getElementById('camaraSalida').value;
-            if (entrada >= 0 || salida >= 0) {
-                iniciarCamaras();
+            const activarEntrada = document.getElementById('activarEntrada').checked;
+            const activarSalida = document.getElementById('activarSalida').checked;
+            if ((activarEntrada && entrada >= 0) || (activarSalida && salida >= 0)) {
+                await iniciarCamaras(false);
             }
-        }, 1000);
+            await actualizarVideos();
+        }
+
+        inicializarPanel();
         
         setInterval(() => {
             cargarRegistros();

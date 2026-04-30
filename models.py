@@ -1,7 +1,18 @@
 import sqlite3
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from config import Config
+
+CDMX_TZ = timezone(timedelta(hours=-6), "America/Mexico_City")
+
+
+def ahora_cdmx():
+    return datetime.now(CDMX_TZ)
+
+
+def fecha_hora_cdmx():
+    return ahora_cdmx().strftime('%Y-%m-%d %H:%M:%S')
+
 
 def get_db_connection():
     conn = sqlite3.connect(Config.DB_PATH)
@@ -148,11 +159,11 @@ def aceptar_solicitud(solicitud_id):
     solicitud = cursor.fetchone()
     
     if solicitud:
-        fecha_actual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        fecha_actual = fecha_hora_cdmx()
         
         fecha_expiracion = None
         if solicitud['tipo'] == 'visitante':
-            fecha_expiracion = (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
+            fecha_expiracion = (ahora_cdmx() + timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
         
         cursor.execute('''
             UPDATE usuarios 
@@ -218,7 +229,7 @@ def eliminar_visitantes_expirados():
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    fecha_actual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    fecha_actual = fecha_hora_cdmx()
     
     cursor.execute("""
         SELECT id, nombre_completo FROM usuarios 
@@ -243,25 +254,55 @@ def eliminar_visitantes_expirados():
     return len(eliminados)
 
 def registrar_entrada_salida(usuario_id, tipo_usuario, numero_casa, tipo_accion, confianza):
+    if tipo_accion not in ("entrada", "salida"):
+        return False
+
     conn = get_db_connection()
     cursor = conn.cursor()
+    fecha_actual = fecha_hora_cdmx()
+
+    cursor.execute("""
+        SELECT tipo_accion FROM registros_entrada_salida
+        WHERE usuario_id = ?
+        ORDER BY fecha_hora DESC, id DESC
+        LIMIT 1
+    """, (usuario_id,))
+    ultimo = cursor.fetchone()
+    if ultimo and ultimo["tipo_accion"] == tipo_accion:
+        conn.close()
+        return False
     
     cursor.execute('''
-        INSERT INTO registros_entrada_salida (usuario_id, tipo_usuario, numero_casa, tipo_accion, confianza)
-        VALUES (?, ?, ?, ?, ?)
-    ''', (usuario_id, tipo_usuario, numero_casa, tipo_accion, confianza))
+        INSERT INTO registros_entrada_salida
+            (usuario_id, tipo_usuario, numero_casa, fecha_hora, tipo_accion, confianza)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (usuario_id, tipo_usuario, numero_casa, fecha_actual, tipo_accion, confianza))
     
     cursor.execute('''
-        UPDATE ultimo_registro SET usuario_id=?, tipo_accion=?, fecha_hora=CURRENT_TIMESTAMP WHERE id=1
-    ''', (usuario_id, tipo_accion))
+        UPDATE ultimo_registro SET usuario_id=?, tipo_accion=?, fecha_hora=? WHERE id=1
+    ''', (usuario_id, tipo_accion, fecha_actual))
     
     conn.commit()
     conn.close()
+    return True
 
 def obtener_ultimo_registro():
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM ultimo_registro WHERE id=1")
+    resultado = cursor.fetchone()
+    conn.close()
+    return resultado
+
+def obtener_ultimo_registro_usuario(usuario_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT * FROM registros_entrada_salida
+        WHERE usuario_id = ?
+        ORDER BY fecha_hora DESC, id DESC
+        LIMIT 1
+    """, (usuario_id,))
     resultado = cursor.fetchone()
     conn.close()
     return resultado
