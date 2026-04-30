@@ -13,7 +13,8 @@ print("=" * 50)
 
 print("\nIniciando camara...")
 
-cap = cv2.VideoCapture(0)
+backend = cv2.CAP_DSHOW if os.name == 'nt' else cv2.CAP_ANY
+cap = cv2.VideoCapture(0, backend)
 
 if not cap.isOpened():
     print("[ERROR] No se pudo abrir la camara")

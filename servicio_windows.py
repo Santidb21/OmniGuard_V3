@@ -34,11 +34,11 @@ class OmniGuardService:
         tipo_camara = Config.CAMERA_TYPE.lower()
         
         if tipo_camara == 'usb':
-            self.cap = cv2.VideoCapture(Config.CAMERA_INDEX)
+            self.cap = cv2.VideoCapture(Config.CAMERA_INDEX, cv2.CAP_DSHOW)
         elif tipo_camara == 'ip':
             self.cap = cv2.VideoCapture(Config.CAMERA_URL)
         else:
-            self.cap = cv2.VideoCapture(0)
+            self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
         
         if not self.cap.isOpened():
             print("[ERROR] No se pudo abrir la camara")
