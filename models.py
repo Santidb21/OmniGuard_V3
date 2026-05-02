@@ -17,6 +17,7 @@ def fecha_hora_cdmx():
 def get_db_connection():
     conn = sqlite3.connect(Config.DB_PATH)
     conn.row_factory = sqlite3.Row
+    conn.execute('PRAGMA journal_mode=WAL;')
     return conn
 
 def init_db():
@@ -62,7 +63,8 @@ def init_db():
             numero_casa TEXT NOT NULL,
             fecha_hora DATETIME DEFAULT CURRENT_TIMESTAMP,
             tipo_accion TEXT NOT NULL,
-            confianza REAL
+            confianza REAL,
+            sincronizado INTEGER DEFAULT 0
         )
     ''')
     
@@ -91,6 +93,11 @@ def init_db():
     
     try:
         cursor.execute('ALTER TABLE usuarios ADD COLUMN fecha_expiracion DATETIME')
+    except:
+        pass
+
+    try:
+        cursor.execute('ALTER TABLE registros_entrada_salida ADD COLUMN sincronizado INTEGER DEFAULT 0')
     except:
         pass
     
@@ -241,7 +248,20 @@ def eliminar_visitantes_expirados():
     
     for usuario in eliminados:
         print(f"[INFO] Eliminando visitante expirado: {usuario['nombre_completo']} (ID: {usuario['id']})")
+        # Eliminar foto si existe
+        foto_path = usuario["foto_path"] if "foto_path" in usuario.keys() else None
+        if foto_path:
+            ruta = foto_path.lstrip("/").replace("/", os.sep)
+            full_path = os.path.join(os.path.dirname(Config.DB_PATH), "..", ruta)
+            if os.path.exists(full_path):
+                os.remove(full_path)
     
+    ids_eliminados = [str(u["id"]) for u in eliminados]
+    if ids_eliminados:
+        placeholders = ",".join(["?"] * len(ids_eliminados))
+        cursor.execute(
+            "DELETE FROM registros_entrada_salida WHERE usuario_id IN ({})".format(placeholders),
+            ids_eliminados)
     cursor.execute("""
         DELETE FROM usuarios 
         WHERE tipo='visitante' AND estado='aceptado' 
@@ -257,6 +277,19 @@ def registrar_entrada_salida(usuario_id, tipo_usuario, numero_casa, tipo_accion,
     if tipo_accion not in ("entrada", "salida"):
         return False
 
+    # Regla de negocio: Visitante solo puede tener 1 entrada + 1 salida
+    if tipo_usuario == "visitante":
+        conn_vis = get_db_connection()
+        cur_vis = conn_vis.cursor()
+        cur_vis.execute(
+            "SELECT COUNT(*) as cnt FROM registros_entrada_salida WHERE usuario_id = ?",
+            (usuario_id,))
+        visits = cur_vis.fetchone()
+        cur_vis.close()
+        conn_vis.close()
+        if visits and visits["cnt"] >= 2:
+            return False  # Ya completo su ciclo entrada+salida
+
     conn = get_db_connection()
     cursor = conn.cursor()
     fecha_actual = fecha_hora_cdmx()
@@ -271,17 +304,17 @@ def registrar_entrada_salida(usuario_id, tipo_usuario, numero_casa, tipo_accion,
     if ultimo and ultimo["tipo_accion"] == tipo_accion:
         conn.close()
         return False
-    
+
     cursor.execute('''
         INSERT INTO registros_entrada_salida
-            (usuario_id, tipo_usuario, numero_casa, fecha_hora, tipo_accion, confianza)
-        VALUES (?, ?, ?, ?, ?, ?)
+            (usuario_id, tipo_usuario, numero_casa, fecha_hora, tipo_accion, confianza, sincronizado)
+        VALUES (?, ?, ?, ?, ?, ?, 0)
     ''', (usuario_id, tipo_usuario, numero_casa, fecha_actual, tipo_accion, confianza))
-    
+
     cursor.execute('''
         UPDATE ultimo_registro SET usuario_id=?, tipo_accion=?, fecha_hora=? WHERE id=1
     ''', (usuario_id, tipo_accion, fecha_actual))
-    
+
     conn.commit()
     conn.close()
     return True
@@ -337,3 +370,29 @@ def guardar_embedding(usuario_id, embedding_bytes):
     cursor.execute("UPDATE usuarios SET embedding = ? WHERE id = ?", (embedding_bytes, usuario_id))
     conn.commit()
     conn.close()
+
+
+def obtener_registros_no_sincronizados(limite=50):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT * FROM registros_entrada_salida WHERE sincronizado = 0 ORDER BY fecha_hora ASC LIMIT ?",
+        (limite,))
+    registros = cursor.fetchall()
+    conn.close()
+    return registros
+
+
+def marcar_registros_sincronizados(lista_ids):
+    if not lista_ids:
+        return 0
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    placeholders = ','.join(['?'] * len(lista_ids))
+    cursor.execute(
+        "UPDATE registros_entrada_salida SET sincronizado = 1 WHERE id IN ({})".format(placeholders),
+        lista_ids)
+    count = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return count
