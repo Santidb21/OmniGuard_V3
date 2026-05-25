@@ -513,6 +513,7 @@ class DetectorRostro:
                 usuario["numero_casa"],
                 tipo_accion,
                 round(confianza * 100, 2),
+                getattr(Config, "CASETA_ACTIVA_ID", None),
             )
             if registrado:
                 self.ultimo_ids_deteccion[tipo_cache] = ahora

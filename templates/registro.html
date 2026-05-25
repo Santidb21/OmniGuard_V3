@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
@@ -50,12 +50,12 @@
                 </div>
 
                 <div class="form-group">
-                    <label class="form-label">Fotos del Rostro</label>
+                    <label class="form-label">Fotos del rostro</label>
                     <div class="file-upload">
                         <input type="file" id="foto" name="fotos" accept="image/jpeg,image/jpg,image/png" multiple>
                         <div class="file-upload-icon">📷</div>
                         <div class="file-upload-text">
-                            <strong>Click para subir</strong> o arrastre sus fotos<br>
+                            <strong>Clic para subir</strong> o arrastre sus fotos<br>
                             JPG, PNG - Máx 10MB
                         </div>
                     </div>
@@ -63,7 +63,7 @@
                         <div id="preview-list" style="display:flex; gap:10px; flex-wrap:wrap; justify-content:center;"></div>
                     </div>
                     <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px;">
-                        <button type="button" class="btn" id="abrirCamaraBtn">Abrir camara</button>
+                        <button type="button" class="btn" id="abrirCamaraBtn">Abrir cámara</button>
                         <button type="button" class="btn btn-success" id="capturarBtn" style="display:none;">Tomar foto y adjuntar</button>
                         <button type="button" class="btn" id="limpiarFotosBtn" style="display:none;">Limpiar fotos</button>
                     </div>
@@ -105,11 +105,11 @@
         const registroCanvas = document.getElementById('registroCanvas');
         const estadoFotos = document.getElementById('estadoFotos');
         let archivosSeleccionados = [];
-        let capturasCamara = [];
+        let capturasCámara = [];
         let streamRegistro = null;
 
         function fotosRegistro() {
-            return [...archivosSeleccionados, ...capturasCamara];
+            return [...archivosSeleccionados, ...capturasCámara];
         }
 
         function claveArchivo(file) {
@@ -163,8 +163,8 @@
         fotoInput.addEventListener('change', function() {
             agregarArchivosSeleccionados(Array.from(fotoInput.files || []));
             if (fotosRegistro().length > 5) {
-                mensajeDiv.innerHTML = '<div class="alert alert-error">Seleccione maximo 5 fotos.</div>';
-                archivosSeleccionados = archivosSeleccionados.slice(0, Math.max(0, 5 - capturasCamara.length));
+                mensajeDiv.innerHTML = '<div class="alert alert-error">Seleccione máximo 5 fotos.</div>';
+                archivosSeleccionados = archivosSeleccionados.slice(0, Math.max(0, 5 - capturasCámara.length));
             }
             sincronizarInputFotos();
             renderPreviews();
@@ -180,13 +180,13 @@
                 registroVideo.style.display = 'block';
                 capturarBtn.style.display = 'inline-flex';
             } catch (error) {
-                mensajeDiv.innerHTML = '<div class="alert alert-error">No se pudo abrir la camara del navegador.</div>';
+                mensajeDiv.innerHTML = '<div class="alert alert-error">No se pudo abrir la cámara del navegador.</div>';
             }
         });
 
         capturarBtn.addEventListener('click', function() {
             if (fotosRegistro().length >= 5) {
-                mensajeDiv.innerHTML = '<div class="alert alert-error">Maximo 5 fotos por solicitud.</div>';
+                mensajeDiv.innerHTML = '<div class="alert alert-error">Máximo 5 fotos por solicitud.</div>';
                 return;
             }
             if (!registroVideo.videoWidth || !registroVideo.videoHeight) return;
@@ -197,17 +197,17 @@
             ctx.drawImage(registroVideo, 0, 0, registroCanvas.width, registroCanvas.height);
             registroCanvas.toBlob(function(blob) {
                 if (!blob) return;
-                capturasCamara.push(new File([blob], 'captura_' + Date.now() + '.jpg', { type: 'image/jpeg' }));
+                capturasCámara.push(new File([blob], 'captura_' + Date.now() + '.jpg', { type: 'image/jpeg' }));
                 sincronizarInputFotos();
                 renderPreviews();
-                mensajeDiv.innerHTML = '<div class="alert alert-success">Foto capturada y adjuntada automaticamente.</div>';
+                mensajeDiv.innerHTML = '<div class="alert alert-success">Foto capturada y adjuntada automáticamente.</div>';
             }, 'image/jpeg', 0.9);
         });
 
         limpiarFotosBtn.addEventListener('click', function() {
             archivosSeleccionados = [];
             fotoInput.value = '';
-            capturasCamara = [];
+            capturasCámara = [];
             sincronizarInputFotos();
             renderPreviews();
         });
@@ -229,7 +229,7 @@
                 return;
             }
             if (totalFotos > 5) {
-                mensajeDiv.innerHTML = '<div class="alert alert-error">Use maximo 5 fotos.</div>';
+                mensajeDiv.innerHTML = '<div class="alert alert-error">Use máximo 5 fotos.</div>';
                 return;
             }
 
@@ -246,7 +246,7 @@
                     mensajeDiv.className = 'fade-in';
                     registroForm.reset();
                     archivosSeleccionados = [];
-                    capturasCamara = [];
+                    capturasCámara = [];
                     previewContainer.style.display = 'none';
                     previewList.innerHTML = '';
                     estadoFotos.textContent = '';
@@ -266,3 +266,6 @@
     </script>
 </body>
 </html>
+
+
+

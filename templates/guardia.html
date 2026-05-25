@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
@@ -361,14 +361,19 @@
 <body>
     <header class="header">
         <div class="container">
-            <div class="logo">OMNI<span>GUARD</span></div>
+            <a class="logo" href="/dashboard" style="text-decoration:none;">OMNI<span>GUARD</span></a>
             <nav style="display: flex; align-items: center; gap: 14px;">
                 <div class="status-indicator">
                     <span class="status-dot" id="statusDot"></span>
                     <span id="statusText">Sistema activo</span>
                 </div>
                 <ul class="nav-links">
-                    <li><a href="/guardia">Panel</a></li>
+                    <li><a href="/dashboard">Inicio</a></li>
+                    <li><a href="/perfil">Perfil</a></li>
+                    <li><a href="/bitacora">Bitácora</a></li>
+                    {% if session.rol == 'administrador' %}
+                    <li><a href="/administracion/usuarios">Administración</a></li>
+                    {% endif %}
                     <li><a href="/logout">Salir</a></li>
                 </ul>
             </nav>
@@ -379,12 +384,18 @@
         <div class="dashboard-izq" style="display: flex; flex-direction: column; gap: 14px;">
             <div class="panel">
                 <div class="panel-header">
-                    <div class="panel-title"><span>⚙️</span> Config Cámaras</div>
+                    <div class="panel-title"><span>⚙️</span> Config. cámaras</div>
                 </div>
                 <div class="camaras-status" id="camarasStatus">
                     <span class="camara-chip">Detectando...</span>
                 </div>
                 <div class="config-section">
+                    <div class="config-row">
+                        <label class="config-label" style="min-width:92px;">Caseta:</label>
+                        <select class="form-select config-select" id="casetaActiva">
+                            <option value="">Sin caseta</option>
+                        </select>
+                    </div>
                     <div class="config-row">
                         <label class="config-label" style="display:flex;align-items:center;gap:6px;min-width:92px;">
                             <input type="checkbox" id="activarEntrada" checked onchange="actualizarActivacionCamaras()">
@@ -423,7 +434,7 @@
             
             <div class="panel" style="max-height: 350px; display: flex; flex-direction: column;">
                 <div class="panel-header">
-                    <div class="panel-title"><span>👥</span> Usuarios Registrados</div>
+                    <div class="panel-title"><span>👥</span> Usuarios registrados</div>
                     <span class="panel-badge" id="usuariosCount">0</span>
                 </div>
                 <div class="scroll-list" id="usuariosList">
@@ -440,7 +451,7 @@
                 <div class="video-section">
                     <div class="video-main">
                         <img id="videoMain" src="" onerror="this.style.display='none'">
-                        <div class="empty-state" id="videoPlaceholder" style="display: none;">Seleccione una camara</div>
+                        <div class="empty-state" id="videoPlaceholder" style="display: none;">Seleccione una cámara</div>
                     </div>
                     <div class="video-thumbs">
                         <div class="video-thumb active" onclick="cambiarVideo('entrada')">
@@ -466,7 +477,7 @@
                         <option value="visitante">Visitantes</option>
                     </select>
                     <select class="form-select" id="filtroAccion" onchange="cargarRegistros()" style="width: auto; padding: 6px 8px; font-size: 0.75rem;">
-                        <option value="">Accion</option>
+                        <option value="">Acción</option>
                         <option value="entrada">Entrada</option>
                         <option value="salida">Salida</option>
                     </select>
@@ -526,7 +537,7 @@
                 salidaSel.innerHTML = '<option value="-1">Sin asignar</option>';
                 
                 if (camarasDetectadas.length === 0) {
-                    statusDiv.innerHTML = '<span class="camara-chip">No se detectaron camaras</span>';
+                    statusDiv.innerHTML = '<span class="camara-chip">No se detectaron cámaras</span>';
                 } else {
                     statusDiv.innerHTML = camarasDetectadas.map(c => 
                         `<span class="camara-chip ${c.activa ? 'active' : ''}">${etiquetaCamara(c)}</span>`
@@ -563,7 +574,7 @@
             const activarSalida = document.getElementById('activarSalida').checked;
 
             if (activarEntrada && activarSalida && entrada >= 0 && salida >= 0 && entrada === salida) {
-                if (mostrarAlerta) showAlert('Entrada y salida no pueden usar la misma camara al mismo tiempo.');
+                if (mostrarAlerta) showAlert('Entrada y salida no pueden usar la misma cámara al mismo tiempo.');
                 return;
             }
             
@@ -572,6 +583,7 @@
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
+                        caseta_id: document.getElementById('casetaActiva')?.value || '',
                         entrada: activarEntrada && entrada >= 0 ? entrada : null,
                         salida: activarSalida && salida >= 0 ? salida : null
                     })
@@ -587,15 +599,15 @@
                         const mensajes = [data.resultados.entrada, data.resultados.salida]
                             .filter(r => r && r.ok)
                             .map(r => `${r.message}${r.backend ? ' (' + r.backend + ')' : ''}`);
-                        showAlert(mensajes.join('\n') || 'Camaras iniciadas');
+                        showAlert(mensajes.join('\n') || 'Cámaras iniciadas');
                     }
                 } else {
                     const mensajes = [data.resultados?.entrada, data.resultados?.salida]
                         .filter(r => r && r.message && r.message !== 'Sin asignar')
                         .map(r => r.message);
-                    if (mostrarAlerta) showAlert(mensajes.join('\n') || 'No se pudo iniciar ninguna camara. Revise que no este ocupada por otra aplicacion.');
+                    if (mostrarAlerta) showAlert(mensajes.join('\n') || 'No se pudo iniciar ninguna cámara. Revise que no esté ocupada por otra aplicación.');
                 }
-            } catch(e) { showAlert('Error al iniciar camaras'); }
+            } catch(e) { showAlert('Error al iniciar cámaras'); }
         }
         
         async function detenerCamaras() {
@@ -605,10 +617,19 @@
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({tipo: 'todas'})
                 });
-                showAlert('Camaras detenidas');
+                showAlert('Cámaras detenidas');
                 await detectarCamaras();
                 await actualizarVideos();
             } catch(e) { console.error(e); }
+        }
+
+        async function cargarCasetasAsignadas() {
+            const select = document.getElementById('casetaActiva');
+            if (!select) return;
+            const resp = await fetch('/api/mis-casetas');
+            const data = await resp.json();
+            const casetas = data.casetas || [];
+            select.innerHTML = '<option value="">Sin caseta</option>' + casetas.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
         }
         
         function cambiarVideo(tipo) {
@@ -660,10 +681,10 @@
                 
                 if (data.entrada.activa || data.salida.activa) {
                     dot.classList.remove('inactive');
-                    text.textContent = 'Camaras activas';
+                    text.textContent = 'Cámaras activas';
                 } else {
                     dot.classList.add('inactive');
-                    text.textContent = 'Sin camaras';
+                    text.textContent = 'Sin cámaras';
                 }
             } catch(e) { console.error(e); }
         }
@@ -810,7 +831,7 @@
                     showAlert(data.message || 'No se pudo tomar la foto para entrenamiento');
                 }
             } catch(e) {
-                showAlert('Error al entrenar desde camara');
+                showAlert('Error al entrenar desde cámara');
             }
         }
 
@@ -818,7 +839,7 @@
             const files = Array.from(e.target.files || []);
             if (!usuarioEntrenamiento || files.length === 0) return;
             if (files.length > 5) {
-                showAlert('Seleccione maximo 5 fotos.');
+                showAlert('Seleccione máximo 5 fotos.');
                 return;
             }
 
@@ -845,6 +866,7 @@
         });
         
         async function inicializarPanel() {
+            await cargarCasetasAsignadas();
             await detectarCamaras();
             cargarSolicitudes();
             cargarUsuarios();
@@ -870,3 +892,8 @@
     </script>
 </body>
 </html>
+
+
+
+
+

@@ -64,7 +64,8 @@ def init_db():
             fecha_hora DATETIME DEFAULT CURRENT_TIMESTAMP,
             tipo_accion TEXT NOT NULL,
             confianza REAL,
-            sincronizado INTEGER DEFAULT 0
+            sincronizado INTEGER DEFAULT 0,
+            caseta_id INTEGER
         )
     ''')
     
@@ -81,6 +82,47 @@ def init_db():
             usuario_id TEXT,
             tipo_accion TEXT,
             fecha_hora DATETIME
+        )
+    ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS cuentas_sistema (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            usuario TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            nombre_completo TEXT NOT NULL,
+            rol TEXT NOT NULL,
+            estado TEXT DEFAULT 'activo',
+            fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP,
+            ultimo_acceso DATETIME
+        )
+    ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS casetas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT NOT NULL,
+            direccion TEXT NOT NULL,
+            colonia TEXT NOT NULL,
+            cp TEXT NOT NULL,
+            ciudad TEXT NOT NULL,
+            estado TEXT NOT NULL,
+            telefono TEXT,
+            email TEXT,
+            contacto_colonia TEXT,
+            telefonos_emergencia TEXT,
+            estado_registro TEXT DEFAULT 'activa',
+            fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS cuenta_casetas (
+            cuenta_id INTEGER NOT NULL,
+            caseta_id INTEGER NOT NULL,
+            PRIMARY KEY (cuenta_id, caseta_id),
+            FOREIGN KEY (cuenta_id) REFERENCES cuentas_sistema (id),
+            FOREIGN KEY (caseta_id) REFERENCES casetas (id)
         )
     ''')
     
@@ -100,7 +142,179 @@ def init_db():
         cursor.execute('ALTER TABLE registros_entrada_salida ADD COLUMN sincronizado INTEGER DEFAULT 0')
     except:
         pass
+
+    try:
+        cursor.execute('ALTER TABLE registros_entrada_salida ADD COLUMN caseta_id INTEGER')
+    except:
+        pass
     
+    conn.commit()
+    conn.close()
+
+
+def crear_cuenta_sistema(usuario, password_hash, nombre_completo, rol):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT OR IGNORE INTO cuentas_sistema (usuario, password_hash, nombre_completo, rol, estado)
+        VALUES (?, ?, ?, ?, 'activo')
+    ''', (usuario, password_hash, nombre_completo, rol))
+    conn.commit()
+    cuenta_id = cursor.lastrowid
+    conn.close()
+    return cuenta_id
+
+
+def obtener_cuenta_por_usuario(usuario):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM cuentas_sistema WHERE usuario = ?", (usuario,))
+    cuenta = cursor.fetchone()
+    conn.close()
+    return cuenta
+
+
+def obtener_cuenta_sistema(cuenta_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM cuentas_sistema WHERE id = ?", (cuenta_id,))
+    cuenta = cursor.fetchone()
+    conn.close()
+    return cuenta
+
+
+def obtener_cuentas_sistema():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, usuario, nombre_completo, rol, estado, fecha_creacion, ultimo_acceso
+        FROM cuentas_sistema
+        ORDER BY rol ASC, nombre_completo ASC
+    """)
+    cuentas = cursor.fetchall()
+    conn.close()
+    return cuentas
+
+
+def obtener_casetas_de_cuenta(cuenta_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT c.*
+        FROM casetas c
+        INNER JOIN cuenta_casetas cc ON cc.caseta_id = c.id
+        WHERE cc.cuenta_id = ?
+        ORDER BY c.nombre ASC
+    """, (cuenta_id,))
+    casetas = cursor.fetchall()
+    conn.close()
+    return casetas
+
+
+def asignar_casetas_cuenta(cuenta_id, caseta_ids):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM cuenta_casetas WHERE cuenta_id = ?", (cuenta_id,))
+    for caseta_id in caseta_ids:
+        cursor.execute(
+            "INSERT OR IGNORE INTO cuenta_casetas (cuenta_id, caseta_id) VALUES (?, ?)",
+            (cuenta_id, caseta_id))
+    conn.commit()
+    conn.close()
+
+
+def actualizar_cuenta_sistema(cuenta_id, usuario, nombre_completo, rol, estado, password_hash=None):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    if password_hash:
+        cursor.execute('''
+            UPDATE cuentas_sistema
+            SET usuario=?, nombre_completo=?, rol=?, estado=?, password_hash=?
+            WHERE id=?
+        ''', (usuario, nombre_completo, rol, estado, password_hash, cuenta_id))
+    else:
+        cursor.execute('''
+            UPDATE cuentas_sistema
+            SET usuario=?, nombre_completo=?, rol=?, estado=?
+            WHERE id=?
+        ''', (usuario, nombre_completo, rol, estado, cuenta_id))
+    conn.commit()
+    conn.close()
+
+
+def eliminar_cuenta_sistema(cuenta_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM cuenta_casetas WHERE cuenta_id = ?", (cuenta_id,))
+    cursor.execute("DELETE FROM cuentas_sistema WHERE id = ?", (cuenta_id,))
+    conn.commit()
+    conn.close()
+
+
+def registrar_acceso_cuenta(cuenta_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE cuentas_sistema SET ultimo_acceso=? WHERE id=?",
+        (fecha_hora_cdmx(), cuenta_id))
+    conn.commit()
+    conn.close()
+
+
+def crear_caseta(nombre, direccion, colonia, cp, ciudad, estado, telefono, email, contacto_colonia, telefonos_emergencia):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO casetas
+            (nombre, direccion, colonia, cp, ciudad, estado, telefono, email, contacto_colonia, telefonos_emergencia, estado_registro)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activa')
+    ''', (nombre, direccion, colonia, cp, ciudad, estado, telefono, email, contacto_colonia, telefonos_emergencia))
+    conn.commit()
+    caseta_id = cursor.lastrowid
+    conn.close()
+    return caseta_id
+
+
+def obtener_casetas(incluir_inactivas=True):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    if incluir_inactivas:
+        cursor.execute("SELECT * FROM casetas ORDER BY nombre ASC")
+    else:
+        cursor.execute("SELECT * FROM casetas WHERE estado_registro='activa' ORDER BY nombre ASC")
+    casetas = cursor.fetchall()
+    conn.close()
+    return casetas
+
+
+def obtener_caseta(caseta_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM casetas WHERE id = ?", (caseta_id,))
+    caseta = cursor.fetchone()
+    conn.close()
+    return caseta
+
+
+def actualizar_caseta(caseta_id, nombre, direccion, colonia, cp, ciudad, estado, telefono, email, contacto_colonia, telefonos_emergencia, estado_registro):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        UPDATE casetas
+        SET nombre=?, direccion=?, colonia=?, cp=?, ciudad=?, estado=?,
+            telefono=?, email=?, contacto_colonia=?, telefonos_emergencia=?, estado_registro=?
+        WHERE id=?
+    ''', (nombre, direccion, colonia, cp, ciudad, estado, telefono, email, contacto_colonia, telefonos_emergencia, estado_registro, caseta_id))
+    conn.commit()
+    conn.close()
+
+
+def eliminar_caseta(caseta_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM cuenta_casetas WHERE caseta_id = ?", (caseta_id,))
+    cursor.execute("UPDATE registros_entrada_salida SET caseta_id = NULL WHERE caseta_id = ?", (caseta_id,))
+    cursor.execute("DELETE FROM casetas WHERE id = ?", (caseta_id,))
     conn.commit()
     conn.close()
 
@@ -273,7 +487,7 @@ def eliminar_visitantes_expirados():
     
     return len(eliminados)
 
-def registrar_entrada_salida(usuario_id, tipo_usuario, numero_casa, tipo_accion, confianza):
+def registrar_entrada_salida(usuario_id, tipo_usuario, numero_casa, tipo_accion, confianza, caseta_id=None):
     if tipo_accion not in ("entrada", "salida"):
         return False
 
@@ -307,9 +521,9 @@ def registrar_entrada_salida(usuario_id, tipo_usuario, numero_casa, tipo_accion,
 
     cursor.execute('''
         INSERT INTO registros_entrada_salida
-            (usuario_id, tipo_usuario, numero_casa, fecha_hora, tipo_accion, confianza, sincronizado)
-        VALUES (?, ?, ?, ?, ?, ?, 0)
-    ''', (usuario_id, tipo_usuario, numero_casa, fecha_actual, tipo_accion, confianza))
+            (usuario_id, tipo_usuario, numero_casa, fecha_hora, tipo_accion, confianza, sincronizado, caseta_id)
+        VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+    ''', (usuario_id, tipo_usuario, numero_casa, fecha_actual, tipo_accion, confianza, caseta_id))
 
     cursor.execute('''
         UPDATE ultimo_registro SET usuario_id=?, tipo_accion=?, fecha_hora=? WHERE id=1
@@ -340,10 +554,30 @@ def obtener_ultimo_registro_usuario(usuario_id):
     conn.close()
     return resultado
 
-def obtener_registros(limite=100):
+def obtener_registros(limite=100, caseta_ids=None):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM registros_entrada_salida ORDER BY fecha_hora DESC LIMIT ?", (limite,))
+    if caseta_ids is None:
+        cursor.execute("""
+            SELECT r.*, c.nombre AS caseta_nombre
+            FROM registros_entrada_salida r
+            LEFT JOIN casetas c ON c.id = r.caseta_id
+            ORDER BY r.fecha_hora DESC
+            LIMIT ?
+        """, (limite,))
+    elif not caseta_ids:
+        conn.close()
+        return []
+    else:
+        placeholders = ",".join(["?"] * len(caseta_ids))
+        cursor.execute("""
+            SELECT r.*, c.nombre AS caseta_nombre
+            FROM registros_entrada_salida r
+            LEFT JOIN casetas c ON c.id = r.caseta_id
+            WHERE r.caseta_id IN ({})
+            ORDER BY r.fecha_hora DESC
+            LIMIT ?
+        """.format(placeholders), list(caseta_ids) + [limite])
     registros = cursor.fetchall()
     conn.close()
     return registros

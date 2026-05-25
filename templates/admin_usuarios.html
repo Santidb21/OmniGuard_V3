@@ -1,0 +1,206 @@
+﻿<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OmniGuard - Administración</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/estilos.css') }}">
+    <style>
+        .main { max-width: 1120px; margin: 0 auto; padding: 20px; }
+        .layout { display: grid; grid-template-columns: 340px 1fr; gap: 16px; }
+        .panel { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+        .form-grid { display: grid; gap: 12px; margin-top: 14px; }
+        .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+        .checks { display: grid; gap: 8px; padding: 10px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); max-height: 160px; overflow-y: auto; }
+        .checks label { display: flex; gap: 8px; align-items: center; color: var(--text-secondary); font-size: .9rem; }
+        .table-wrap { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 10px; border-bottom: 1px solid var(--border); text-align: left; font-size: .88rem; }
+        th { color: var(--text-secondary); font-weight: 500; }
+        @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="container">
+            <a class="logo" href="/dashboard" style="text-decoration:none;">OMNI<span>GUARD</span></a>
+            <ul class="nav-links">
+                <li><a href="/dashboard">Inicio</a></li>
+                <li><a href="/administracion/casetas">Casetas</a></li>
+                <li><a href="/camaras">Cámaras</a></li>
+                <li><a href="/bitacora">Bitácora</a></li>
+                <li><a href="/logout">Salir</a></li>
+            </ul>
+        </div>
+    </header>
+    <main class="main">
+        <div class="layout">
+            <section class="panel">
+                <h2 id="formTitle">Nuevo usuario</h2>
+                <form class="form-grid" id="cuentaForm">
+                    <input type="hidden" id="cuentaId">
+                    <div>
+                        <label class="form-label">Nombre completo</label>
+                        <input class="form-input" id="nombre" required>
+                    </div>
+                    <div>
+                        <label class="form-label">Usuario</label>
+                        <input class="form-input" id="usuario" required>
+                    </div>
+                    <div>
+                        <label class="form-label">Contraseña</label>
+                        <input class="form-input" id="password" type="password" placeholder="Requerida al crear">
+                    </div>
+                    <div>
+                        <label class="form-label">Tipo de usuario</label>
+                        <select class="form-select" id="rol" required>
+                            <option value="administrador">Administrador</option>
+                            <option value="vigilante">Vigilante</option>
+                            <option value="consultor">Consultor</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="form-label">Estado</label>
+                        <select class="form-select" id="estado">
+                            <option value="activo">Activo</option>
+                            <option value="inactivo">Inactivo</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="form-label">Casetas asignadas</label>
+                        <div class="checks" id="casetasChecks">
+                            <span style="color:var(--text-muted);">Cargando casetas...</span>
+                        </div>
+                    </div>
+                    <div class="actions">
+                        <button class="btn btn-primary" type="submit">Guardar</button>
+                        <button class="btn" type="button" onclick="limpiarForm()">Nuevo</button>
+                    </div>
+                </form>
+            </section>
+            <section class="panel">
+                <h2>Usuarios del sistema</h2>
+                <div class="table-wrap" style="margin-top:14px;">
+                    <table>
+                        <thead><tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Estado</th><th>Acciones</th></tr></thead>
+                        <tbody id="cuentas"><tr><td colspan="5">Cargando...</td></tr></tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+    </main>
+    <script>
+        const roles = {{ roles|tojson }};
+        let cuentas = [];
+        let casetas = [];
+
+        function limpiarForm() {
+            document.getElementById('formTitle').textContent = 'Nuevo usuario';
+            document.getElementById('cuentaId').value = '';
+            document.getElementById('cuentaForm').reset();
+            document.getElementById('estado').value = 'activo';
+            marcarCasetas([]);
+        }
+
+        function editarCuenta(id) {
+            const cuenta = cuentas.find(c => c.id === id);
+            if (!cuenta) return;
+            document.getElementById('formTitle').textContent = 'Editar usuario';
+            document.getElementById('cuentaId').value = cuenta.id;
+            document.getElementById('nombre').value = cuenta.nombre_completo;
+            document.getElementById('usuario').value = cuenta.usuario;
+            document.getElementById('password').value = '';
+            document.getElementById('rol').value = cuenta.rol;
+            document.getElementById('estado').value = cuenta.estado;
+            marcarCasetas(cuenta.casetas || []);
+        }
+
+        function casetasSeleccionadas() {
+            return Array.from(document.querySelectorAll('.caseta-check:checked')).map(el => Number(el.value));
+        }
+
+        function marcarCasetas(ids) {
+            const set = new Set((ids || []).map(Number));
+            document.querySelectorAll('.caseta-check').forEach(el => el.checked = set.has(Number(el.value)));
+        }
+
+        async function cargarCasetas() {
+            const resp = await fetch('/api/casetas');
+            const data = await resp.json();
+            casetas = data.casetas || [];
+            const box = document.getElementById('casetasChecks');
+            if (!casetas.length) {
+                box.innerHTML = '<span style="color:var(--text-muted);">Primero crea una caseta.</span>';
+                return;
+            }
+            box.innerHTML = casetas.map(c => `
+                <label>
+                    <input type="checkbox" class="caseta-check" value="${c.id}">
+                    <span>${c.nombre} - ${c.colonia}</span>
+                </label>
+            `).join('');
+        }
+
+        async function eliminarCuenta(id) {
+            if (!confirm('Eliminar este usuario del sistema?')) return;
+            const resp = await fetch('/api/cuentas/' + id, { method: 'DELETE' });
+            const data = await resp.json();
+            if (!data.success) alert(data.message || 'No se pudo eliminar');
+            cargarCuentas();
+        }
+
+        async function cargarCuentas() {
+            const resp = await fetch('/api/cuentas');
+            const data = await resp.json();
+            cuentas = data.cuentas || [];
+            const tbody = document.getElementById('cuentas');
+            if (cuentas.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5">Sin usuarios</td></tr>';
+                return;
+            }
+            tbody.innerHTML = cuentas.map(c => `
+                <tr>
+                    <td>${c.nombre_completo}</td>
+                    <td>${c.usuario}</td>
+                    <td>${roles[c.rol] || c.rol}</td>
+                    <td>${c.estado}</td>
+                    <td class="actions">
+                        <button class="btn btn-sm" onclick="editarCuenta(${c.id})">Editar</button>
+                        <button class="btn btn-sm btn-danger" onclick="eliminarCuenta(${c.id})">Eliminar</button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        document.getElementById('cuentaForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const id = document.getElementById('cuentaId').value;
+            const payload = {
+                nombre_completo: document.getElementById('nombre').value,
+                usuario: document.getElementById('usuario').value,
+                password: document.getElementById('password').value,
+                rol: document.getElementById('rol').value,
+                estado: document.getElementById('estado').value,
+                casetas: casetasSeleccionadas()
+            };
+            const resp = await fetch(id ? '/api/cuentas/' + id : '/api/cuentas', {
+                method: id ? 'PUT' : 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await resp.json();
+            if (!data.success) {
+                alert(data.message || 'No se pudo guardar');
+                return;
+            }
+            limpiarForm();
+            cargarCuentas();
+        });
+
+        cargarCasetas().then(cargarCuentas);
+    </script>
+</body>
+</html>
+
+
+

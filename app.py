@@ -1,4 +1,4 @@
-import os
+﻿import os
 import sys
 import time
 import warnings
@@ -10,6 +10,7 @@ from datetime import datetime
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_from_directory, Response
 from werkzeug.utils import secure_filename
+from werkzeug.security import generate_password_hash, check_password_hash
 from flask_cors import CORS
 
 from config import Config
@@ -18,7 +19,12 @@ from models import (
     aceptar_solicitud, denegar_solicitud, obtener_usuarios_aceptados,
     obtener_usuarios_activos, dar_de_baja_usuario, eliminar_visitantes_expirados,
     registrar_entrada_salida, obtener_registros, obtener_usuario_por_id,
-    obtener_embedding, get_db_connection, guardar_embedding
+    obtener_embedding, get_db_connection, guardar_embedding,
+    crear_cuenta_sistema, obtener_cuenta_por_usuario, obtener_cuenta_sistema,
+    obtener_cuentas_sistema, actualizar_cuenta_sistema, eliminar_cuenta_sistema,
+    registrar_acceso_cuenta, crear_caseta, obtener_casetas, obtener_caseta,
+    actualizar_caseta, eliminar_caseta, obtener_casetas_de_cuenta,
+    asignar_casetas_cuenta
 )
 from reconocimiento.registros import exportar_registros_mensuales
 from reconocimiento.detector import obtener_detector, iniciar_deteccion
@@ -56,7 +62,15 @@ CAMARAS_ACTIVAS = {
     'salida': False
 }
 
+CASETA_ACTIVA_ID = None
+
 detector_inicializado = False
+
+ROLES_SISTEMA = {
+    'administrador': 'Administrador',
+    'vigilante': 'Vigilante',
+    'consultor': 'Consultor'
+}
 
 if os.name == 'nt':
     BACKENDS_CAMARA = [
@@ -128,7 +142,7 @@ def detectar_camaras():
             indices_activos.add(indice)
             info = {
                 'indice': indice,
-                'nombre': 'Camara {} ({})'.format(indice, tipo),
+                'nombre': 'Cámara {} ({})'.format(indice, tipo),
                 'backend': CAMERA_BACKENDS.get(tipo) or 'activa',
                 'activa': True,
                 'asignada': tipo
@@ -149,7 +163,7 @@ def detectar_camaras():
 
         info = {
             'indice': i,
-            'nombre': 'Camara {}'.format(i),
+            'nombre': 'Cámara {}'.format(i),
             'backend': backend,
             'activa': False,
             'asignada': None,
@@ -171,6 +185,39 @@ def login_requerido(f):
         return f(*args, **kwargs)
     return decorated_function
 
+def rol_actual():
+    return session.get('rol')
+
+def usuario_actual():
+    cuenta_id = session.get('cuenta_id')
+    if not cuenta_id:
+        return None
+    return obtener_cuenta_sistema(cuenta_id)
+
+def roles_requeridos(*roles):
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            if 'usuario' not in session:
+                return redirect(url_for('login'))
+            if rol_actual() not in roles:
+                if request.path.startswith('/api/'):
+                    return jsonify({'success': False, 'message': 'No autorizado'}), 403
+                return redirect(url_for('dashboard'))
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
+def asegurar_cuenta_admin():
+    if obtener_cuenta_por_usuario(Config.ADMIN_USERNAME):
+        return
+    crear_cuenta_sistema(
+        Config.ADMIN_USERNAME,
+        generate_password_hash(Config.ADMIN_PASSWORD),
+        'Administrador OmniGuard',
+        'administrador'
+    )
+
 @app.before_request
 def verificar_directorios():
     os.makedirs(Config.FOTOS_PATH, exist_ok=True)
@@ -178,6 +225,7 @@ def verificar_directorios():
     os.makedirs(Config.REGISTROS_PATH, exist_ok=True)
     os.makedirs(Config.LOGS_PATH, exist_ok=True)
     init_db()
+    asegurar_cuenta_admin()
     verificar_mes_nuevo()
     verificar_visitantes_expirados()
 
@@ -219,6 +267,37 @@ def verificar_visitantes_expirados():
             print("[INFO] Se eliminaron {} visitantes expirados".format(eliminados))
     except Exception as e:
         print("[ERROR] Verificando visitantes: {}".format(e))
+
+def serializar_caseta(caseta):
+    return {
+        'id': caseta['id'],
+        'nombre': caseta['nombre'],
+        'direccion': caseta['direccion'],
+        'colonia': caseta['colonia'],
+        'cp': caseta['cp'],
+        'ciudad': caseta['ciudad'],
+        'estado': caseta['estado'],
+        'telefono': caseta['telefono'],
+        'email': caseta['email'],
+        'contacto_colonia': caseta['contacto_colonia'],
+        'telefonos_emergencia': caseta['telefonos_emergencia'],
+        'estado_registro': caseta['estado_registro'],
+        'fecha_creacion': caseta['fecha_creacion']
+    }
+
+def extraer_campos_caseta(data):
+    return {
+        'nombre': (data.get('nombre') or '').strip(),
+        'direccion': (data.get('direccion') or '').strip(),
+        'colonia': (data.get('colonia') or '').strip(),
+        'cp': (data.get('cp') or '').strip(),
+        'ciudad': (data.get('ciudad') or '').strip(),
+        'estado': (data.get('estado') or '').strip(),
+        'telefono': (data.get('telefono') or '').strip(),
+        'email': (data.get('email') or '').strip(),
+        'contacto_colonia': (data.get('contacto_colonia') or '').strip(),
+        'telefonos_emergencia': (data.get('telefonos_emergencia') or '').strip()
+    }
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in Config.ALLOWED_EXTENSIONS
@@ -285,7 +364,7 @@ def generar_frames_video(tipo_camara):
         try:
             ret, frame = leer_frame_camara(tipo_camara)
         except Exception as e:
-            print("[ERROR] Leyendo frame de camara {}: {}".format(tipo_camara, e))
+            print("[ERROR] Leyendo frame de cámara {}: {}".format(tipo_camara, e))
             break
 
         if not ret:
@@ -339,18 +418,18 @@ def generar_frames_video(tipo_camara):
             print("[ERROR] Generando frame: {}".format(e))
             break
 
-    print("[INFO] Stream de camara {} terminado".format(tipo_camara))
+    print("[INFO] Stream de cámara {} terminado".format(tipo_camara))
 
 def iniciar_camara(tipo_camara, indice):
     try:
         indice = int(indice)
         otro_tipo = 'salida' if tipo_camara == 'entrada' else 'entrada'
         if CAMARAS_ACTIVAS.get(otro_tipo) and CONFIG_CAMARAS.get(otro_tipo) == indice:
-            print("[WARN] Camara {} ya esta usando el indice {}".format(otro_tipo, indice))
+            print("[WARN] Cámara {} ya está usando el índice {}".format(otro_tipo, indice))
             return {
                 'ok': False,
                 'indice': indice,
-                'message': 'La camara {} ya esta asignada a {}'.format(indice, otro_tipo)
+                'message': 'La cámara {} ya está asignada a {}'.format(indice, otro_tipo)
             }
 
         if CAPTURAS.get(tipo_camara):
@@ -369,27 +448,27 @@ def iniciar_camara(tipo_camara, indice):
             if detector:
                 detector.actualizar_cache()
             alto, ancho = frame.shape[:2]
-            print("[INFO] Camara {} iniciada en indice {} con backend {}".format(tipo_camara, indice, backend))
+            print("[INFO] Cámara {} iniciada en índice {} con backend {}".format(tipo_camara, indice, backend))
             return {
                 'ok': True,
                 'indice': indice,
                 'backend': backend,
                 'resolucion': '{}x{}'.format(ancho, alto),
-                'message': 'Camara {} iniciada'.format(tipo_camara)
+                'message': 'Cámara {} iniciada'.format(tipo_camara)
             }
 
         CAMARAS_ACTIVAS[tipo_camara] = False
         CAPTURAS[tipo_camara] = None
         CAPTURA_LOCKS[tipo_camara] = None
         CAMERA_BACKENDS[tipo_camara] = None
-        print("[ERROR] No se pudo abrir camara {}".format(tipo_camara))
+        print("[ERROR] No se pudo abrir cámara {}".format(tipo_camara))
         return {
             'ok': False,
             'indice': indice,
-            'message': 'No se pudo abrir la camara {}. Puede estar ocupada o sin permisos.'.format(indice)
+            'message': 'No se pudo abrir la cámara {}. Puede estar ocupada o sin permisos.'.format(indice)
         }
     except Exception as e:
-        print("[ERROR] Iniciando camara: {}".format(e))
+        print("[ERROR] Iniciando cámara: {}".format(e))
         return {
             'ok': False,
             'indice': indice if 'indice' in locals() else None,
@@ -404,10 +483,10 @@ def detener_camara(tipo_camara):
             CAPTURAS[tipo_camara] = None
         CAPTURA_LOCKS[tipo_camara] = None
         CAMERA_BACKENDS[tipo_camara] = None
-        print("[INFO] Camara {} detenida".format(tipo_camara))
+        print("[INFO] Cámara {} detenida".format(tipo_camara))
         return True
     except Exception as e:
-        print("[ERROR] Deteniendo camara: {}".format(e))
+        print("[ERROR] Deteniendo cámara: {}".format(e))
         return False
 
 @app.route('/')
@@ -423,34 +502,71 @@ def login():
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
-        if username == Config.ADMIN_USERNAME and password == Config.ADMIN_PASSWORD:
-            session['usuario'] = username
-            return redirect(url_for('panel_guardia'))
-        else:
-            return render_template('login.html', error='Usuario o contrasena incorrectos')
+        cuenta = obtener_cuenta_por_usuario(username)
+        if cuenta and cuenta['estado'] == 'activo' and check_password_hash(cuenta['password_hash'], password):
+            session.clear()
+            session['usuario'] = cuenta['usuario']
+            session['cuenta_id'] = cuenta['id']
+            session['nombre_completo'] = cuenta['nombre_completo']
+            session['rol'] = cuenta['rol']
+            registrar_acceso_cuenta(cuenta['id'])
+            return redirect(url_for('dashboard'))
+        return render_template('login.html', error='Usuario o contraseña incorrectos')
     return render_template('login.html')
 
 @app.route('/logout')
 def logout():
-    session.pop('usuario', None)
+    session.clear()
     return redirect(url_for('login'))
 
-@app.route('/guardia')
+@app.route('/dashboard')
 @login_requerido
+def dashboard():
+    cuenta = usuario_actual()
+    return render_template('dashboard.html', cuenta=cuenta, roles=ROLES_SISTEMA)
+
+@app.route('/perfil')
+@login_requerido
+def perfil():
+    cuenta = usuario_actual()
+    return render_template('perfil.html', cuenta=cuenta, roles=ROLES_SISTEMA)
+
+@app.route('/camaras')
+@roles_requeridos('administrador', 'vigilante')
+def camaras():
+    return redirect(url_for('panel_guardia'))
+
+@app.route('/administracion/usuarios')
+@roles_requeridos('administrador')
+def administracion_usuarios():
+    return render_template('admin_usuarios.html', roles=ROLES_SISTEMA)
+
+@app.route('/administracion/casetas')
+@roles_requeridos('administrador')
+def administracion_casetas():
+    return render_template('admin_casetas.html')
+
+@app.route('/bitacora')
+@roles_requeridos('administrador', 'vigilante', 'consultor')
+def bitacora():
+    return render_template('bitacora.html')
+
+@app.route('/guardia')
+@roles_requeridos('administrador', 'vigilante')
 def panel_guardia():
     return render_template('guardia.html')
 
 @app.route('/video_feed/<tipo>')
-@login_requerido
+@roles_requeridos('administrador', 'vigilante')
 def video_feed(tipo):
     if tipo in ['entrada', 'salida'] and CAMARAS_ACTIVAS.get(tipo) and CAPTURAS.get(tipo) is not None:
         return Response(generar_frames_video(tipo), mimetype='multipart/x-mixed-replace; boundary=frame')
     if tipo in ['entrada', 'salida']:
-        return "Camara no activa", 409
-    return "Tipo de camara invalido", 400
+        return "Cámara no activa", 409
+    return "Tipo de cámara inválido", 400
 
 @app.route('/api/camaras/detectar', methods=['GET'])
-@login_requerido
+@roles_requeridos('administrador', 'vigilante')
 def api_detectar_camaras():
     camaras = detectar_camaras()
     return jsonify({
@@ -460,9 +576,22 @@ def api_detectar_camaras():
     })
 
 @app.route('/api/camaras/configurar', methods=['POST'])
-@login_requerido
+@roles_requeridos('administrador', 'vigilante')
 def api_configurar_camaras():
     data = request.get_json() or {}
+    global CASETA_ACTIVA_ID
+    caseta_id = data.get('caseta_id')
+    if caseta_id in ('', None):
+        CASETA_ACTIVA_ID = None
+        Config.CASETA_ACTIVA_ID = None
+    else:
+        caseta_id = int(caseta_id)
+        if rol_actual() != 'administrador':
+            permitidas = [c['id'] for c in obtener_casetas_de_cuenta(session.get('cuenta_id'))]
+            if caseta_id not in permitidas:
+                return jsonify({'success': False, 'message': 'No tienes asignada esa caseta'}), 403
+        CASETA_ACTIVA_ID = caseta_id
+        Config.CASETA_ACTIVA_ID = caseta_id
     entrada = data.get('entrada')
     salida = data.get('salida')
     
@@ -496,7 +625,7 @@ def api_configurar_camaras():
     })
 
 @app.route('/api/camaras/detener', methods=['POST'])
-@login_requerido
+@roles_requeridos('administrador', 'vigilante')
 def api_detener_camaras():
     data = request.get_json()
     tipo = data.get('tipo', 'todas')
@@ -510,7 +639,7 @@ def api_detener_camaras():
     return jsonify({'success': True})
 
 @app.route('/api/camaras/estado', methods=['GET'])
-@login_requerido
+@roles_requeridos('administrador', 'vigilante')
 def api_estado_camaras():
     return jsonify(estado_camaras())
 
@@ -526,7 +655,8 @@ def estado_camaras():
             'indice': CONFIG_CAMARAS.get('salida'),
             'backend': CAMERA_BACKENDS.get('salida')
         },
-        'detectadas': CONFIG_CAMARAS.get('detectadas', [])
+        'detectadas': CONFIG_CAMARAS.get('detectadas', []),
+        'caseta_id': CASETA_ACTIVA_ID
     }
 
 @app.route('/api/registro', methods=['POST'])
@@ -541,19 +671,19 @@ def api_registro():
         fotos = [foto for foto in fotos if foto and foto.filename]
         
         if not nombre_completo or len(nombre_completo) < 3:
-            return jsonify({'success': False, 'message': 'Nombre invalido'})
+            return jsonify({'success': False, 'message': 'Nombre inválido'})
         
         if not numero_casa or not numero_casa.isdigit() or int(numero_casa) < 1 or int(numero_casa) > 999:
-            return jsonify({'success': False, 'message': 'Numero de casa invalido'})
+            return jsonify({'success': False, 'message': 'Número de casa inválido'})
         
         if tipo not in ['residente', 'visitante']:
-            return jsonify({'success': False, 'message': 'Tipo de usuario invalido'})
+            return jsonify({'success': False, 'message': 'Tipo de usuario inválido'})
         
         if not fotos:
             return jsonify({'success': False, 'message': 'Foto requerida'})
 
         if len(fotos) > 5:
-            return jsonify({'success': False, 'message': 'Suba maximo 5 fotos de entrenamiento'})
+            return jsonify({'success': False, 'message': 'Suba máximo 5 fotos de entrenamiento'})
 
         rutas_guardadas = []
         nombres_guardados = []
@@ -598,7 +728,7 @@ def api_registro():
         return jsonify({'success': False, 'message': 'Error del servidor'})
 
 @app.route('/api/solicitudes', methods=['GET'])
-@login_requerido
+@roles_requeridos('administrador', 'vigilante')
 def api_solicitudes():
     solicitudes = obtener_solicitudes_pendientes()
     return jsonify({
@@ -617,7 +747,7 @@ def api_solicitudes():
     })
 
 @app.route('/api/solicitudes/<int:solicitud_id>/aceptar', methods=['POST'])
-@login_requerido
+@roles_requeridos('administrador', 'vigilante')
 def api_aceptar_solicitud(solicitud_id):
     try:
         aceptar_solicitud(solicitud_id)
@@ -629,7 +759,7 @@ def api_aceptar_solicitud(solicitud_id):
         return jsonify({'success': False, 'message': str(e)})
 
 @app.route('/api/solicitudes/<int:solicitud_id>/denegar', methods=['POST'])
-@login_requerido
+@roles_requeridos('administrador', 'vigilante')
 def api_denegar_solicitud(solicitud_id):
     try:
         denegar_solicitud(solicitud_id)
@@ -638,13 +768,23 @@ def api_denegar_solicitud(solicitud_id):
         return jsonify({'success': False, 'message': str(e)})
 
 @app.route('/api/registros', methods=['GET'])
-@login_requerido
+@roles_requeridos('administrador', 'vigilante', 'consultor')
 def api_registros():
     tipo_filtro = request.args.get('tipo', '')
     accion_filtro = request.args.get('accion', '')
     casa_filtro = request.args.get('casa', '')
     
-    registros = obtener_registros(limite=200)
+    caseta_filtro = request.args.get('caseta_id', '')
+    casetas_permitidas = None
+    if rol_actual() != 'administrador':
+        casetas_permitidas = [c['id'] for c in obtener_casetas_de_cuenta(session.get('cuenta_id'))]
+    if caseta_filtro:
+        caseta_id = int(caseta_filtro)
+        if casetas_permitidas is not None and caseta_id not in casetas_permitidas:
+            return jsonify({'registros': []})
+        casetas_permitidas = [caseta_id]
+
+    registros = obtener_registros(limite=200, caseta_ids=casetas_permitidas)
     
     resultados = []
     for r in registros:
@@ -662,13 +802,24 @@ def api_registros():
             'numero_casa': r['numero_casa'],
             'fecha_hora': r['fecha_hora'],
             'tipo_accion': r['tipo_accion'],
-            'confianza': r['confianza']
+            'confianza': r['confianza'],
+            'caseta_id': r['caseta_id'] if 'caseta_id' in r.keys() else None,
+            'caseta_nombre': r['caseta_nombre'] if 'caseta_nombre' in r.keys() else None
         })
     
     return jsonify({'registros': resultados})
 
+@app.route('/api/mis-casetas', methods=['GET'])
+@roles_requeridos('administrador', 'vigilante', 'consultor')
+def api_mis_casetas():
+    if rol_actual() == 'administrador':
+        casetas = obtener_casetas(incluir_inactivas=False)
+    else:
+        casetas = obtener_casetas_de_cuenta(session.get('cuenta_id'))
+    return jsonify({'casetas': [serializar_caseta(c) for c in casetas]})
+
 @app.route('/api/usuarios', methods=['GET'])
-@login_requerido
+@roles_requeridos('administrador', 'vigilante')
 def api_usuarios():
     usuarios = obtener_usuarios_aceptados()
     return jsonify({
@@ -685,7 +836,7 @@ def api_usuarios():
     })
 
 @app.route('/api/usuarios/activos', methods=['GET'])
-@login_requerido
+@roles_requeridos('administrador', 'vigilante')
 def api_usuarios_activos():
     usuarios = obtener_usuarios_activos()
     return jsonify({
@@ -701,8 +852,131 @@ def api_usuarios_activos():
         ]
     })
 
+@app.route('/api/cuentas', methods=['GET'])
+@roles_requeridos('administrador')
+def api_cuentas():
+    cuentas = obtener_cuentas_sistema()
+    return jsonify({
+        'cuentas': [
+            {
+                'id': c['id'],
+                'usuario': c['usuario'],
+                'nombre_completo': c['nombre_completo'],
+                'rol': c['rol'],
+                'estado': c['estado'],
+                'fecha_creacion': c['fecha_creacion'],
+                'ultimo_acceso': c['ultimo_acceso'],
+                'casetas': [caseta['id'] for caseta in obtener_casetas_de_cuenta(c['id'])]
+            }
+            for c in cuentas
+        ]
+    })
+
+@app.route('/api/cuentas', methods=['POST'])
+@roles_requeridos('administrador')
+def api_cuenta_crear():
+    data = request.get_json() or {}
+    usuario = (data.get('usuario') or '').strip()
+    password = data.get('password') or ''
+    nombre = (data.get('nombre_completo') or '').strip()
+    rol = data.get('rol')
+    caseta_ids = data.get('casetas') or []
+
+    if not usuario or not password or not nombre:
+        return jsonify({'success': False, 'message': 'Usuario, nombre y contraseña son obligatorios'}), 400
+    if rol not in ROLES_SISTEMA:
+        return jsonify({'success': False, 'message': 'Rol inválido'}), 400
+    if obtener_cuenta_por_usuario(usuario):
+        return jsonify({'success': False, 'message': 'El usuario ya existe'}), 409
+
+    cuenta_id = crear_cuenta_sistema(usuario, generate_password_hash(password), nombre, rol)
+    asignar_casetas_cuenta(cuenta_id, caseta_ids)
+    return jsonify({'success': True, 'id': cuenta_id, 'message': 'Cuenta creada'})
+
+@app.route('/api/cuentas/<int:cuenta_id>', methods=['PUT'])
+@roles_requeridos('administrador')
+def api_cuenta_actualizar(cuenta_id):
+    data = request.get_json() or {}
+    cuenta = obtener_cuenta_sistema(cuenta_id)
+    if not cuenta:
+        return jsonify({'success': False, 'message': 'Cuenta no encontrada'}), 404
+
+    usuario = (data.get('usuario') or '').strip()
+    nombre = (data.get('nombre_completo') or '').strip()
+    rol = data.get('rol')
+    estado = data.get('estado', 'activo')
+    password = data.get('password') or ''
+    caseta_ids = data.get('casetas') or []
+
+    if not usuario or not nombre:
+        return jsonify({'success': False, 'message': 'Usuario y nombre son obligatorios'}), 400
+    if rol not in ROLES_SISTEMA:
+        return jsonify({'success': False, 'message': 'Rol inválido'}), 400
+    if estado not in ('activo', 'inactivo'):
+        return jsonify({'success': False, 'message': 'Estado inválido'}), 400
+
+    existente = obtener_cuenta_por_usuario(usuario)
+    if existente and existente['id'] != cuenta_id:
+        return jsonify({'success': False, 'message': 'El usuario ya existe'}), 409
+
+    password_hash = generate_password_hash(password) if password else None
+    actualizar_cuenta_sistema(cuenta_id, usuario, nombre, rol, estado, password_hash)
+    asignar_casetas_cuenta(cuenta_id, caseta_ids)
+    return jsonify({'success': True, 'message': 'Cuenta actualizada'})
+
+@app.route('/api/cuentas/<int:cuenta_id>', methods=['DELETE'])
+@roles_requeridos('administrador')
+def api_cuenta_eliminar(cuenta_id):
+    if session.get('cuenta_id') == cuenta_id:
+        return jsonify({'success': False, 'message': 'No puedes eliminar tu propia cuenta activa'}), 400
+    cuenta = obtener_cuenta_sistema(cuenta_id)
+    if not cuenta:
+        return jsonify({'success': False, 'message': 'Cuenta no encontrada'}), 404
+    eliminar_cuenta_sistema(cuenta_id)
+    return jsonify({'success': True, 'message': 'Cuenta eliminada'})
+
+@app.route('/api/casetas', methods=['GET'])
+@roles_requeridos('administrador')
+def api_casetas():
+    return jsonify({'casetas': [serializar_caseta(c) for c in obtener_casetas()]})
+
+@app.route('/api/casetas', methods=['POST'])
+@roles_requeridos('administrador')
+def api_caseta_crear():
+    data = request.get_json() or {}
+    campos = extraer_campos_caseta(data)
+    faltantes = [k for k in ['nombre', 'direccion', 'colonia', 'cp', 'ciudad', 'estado'] if not campos[k]]
+    if faltantes:
+        return jsonify({'success': False, 'message': 'Campos obligatorios: {}'.format(', '.join(faltantes))}), 400
+    caseta_id = crear_caseta(**campos)
+    return jsonify({'success': True, 'id': caseta_id, 'message': 'Caseta creada'})
+
+@app.route('/api/casetas/<int:caseta_id>', methods=['PUT'])
+@roles_requeridos('administrador')
+def api_caseta_actualizar(caseta_id):
+    if not obtener_caseta(caseta_id):
+        return jsonify({'success': False, 'message': 'Caseta no encontrada'}), 404
+    data = request.get_json() or {}
+    campos = extraer_campos_caseta(data)
+    estado_registro = data.get('estado_registro', 'activa')
+    if estado_registro not in ('activa', 'inactiva'):
+        return jsonify({'success': False, 'message': 'Estado de caseta inválido'}), 400
+    faltantes = [k for k in ['nombre', 'direccion', 'colonia', 'cp', 'ciudad', 'estado'] if not campos[k]]
+    if faltantes:
+        return jsonify({'success': False, 'message': 'Campos obligatorios: {}'.format(', '.join(faltantes))}), 400
+    actualizar_caseta(caseta_id, estado_registro=estado_registro, **campos)
+    return jsonify({'success': True, 'message': 'Caseta actualizada'})
+
+@app.route('/api/casetas/<int:caseta_id>', methods=['DELETE'])
+@roles_requeridos('administrador')
+def api_caseta_eliminar(caseta_id):
+    if not obtener_caseta(caseta_id):
+        return jsonify({'success': False, 'message': 'Caseta no encontrada'}), 404
+    eliminar_caseta(caseta_id)
+    return jsonify({'success': True, 'message': 'Caseta eliminada'})
+
 @app.route('/api/usuarios/<usuario_id>/borrar', methods=['POST'])
-@login_requerido
+@roles_requeridos('administrador', 'vigilante')
 def api_usuario_borrar(usuario_id):
     try:
         usuario = obtener_usuario_por_id(usuario_id)
@@ -719,7 +993,7 @@ def api_usuario_borrar(usuario_id):
         return jsonify({'success': False, 'message': str(e)})
 
 @app.route('/api/usuarios/<usuario_id>/entrenar', methods=['POST'])
-@login_requerido
+@roles_requeridos('administrador', 'vigilante')
 def api_usuario_entrenar(usuario_id):
     try:
         usuario = obtener_usuario_por_id(usuario_id)
@@ -734,7 +1008,7 @@ def api_usuario_entrenar(usuario_id):
         if not fotos:
             return jsonify({'success': False, 'message': 'Fotos requeridas'})
         if len(fotos) > 5:
-            return jsonify({'success': False, 'message': 'Suba maximo 5 fotos'})
+            return jsonify({'success': False, 'message': 'Suba máximo 5 fotos'})
 
         rutas_guardadas = []
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -764,7 +1038,7 @@ def api_usuario_entrenar(usuario_id):
         return jsonify({'success': False, 'message': str(e)})
 
 @app.route('/api/usuarios/<usuario_id>/entrenar/camara', methods=['POST'])
-@login_requerido
+@roles_requeridos('administrador', 'vigilante')
 def api_usuario_entrenar_camara(usuario_id):
     try:
         usuario = obtener_usuario_por_id(usuario_id)
@@ -787,14 +1061,14 @@ def api_usuario_entrenar_camara(usuario_id):
                     break
 
         if frame is None:
-            return jsonify({'success': False, 'message': 'No hay camara activa para tomar la foto'})
+            return jsonify({'success': False, 'message': 'No hay cámara activa para tomar la foto'})
 
         os.makedirs(Config.FOTOS_PATH, exist_ok=True)
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         nombre_archivo = "{}_train_{}_camara_{}.jpg".format(timestamp, usuario_id, tipo_usado)
         filepath = os.path.join(Config.FOTOS_PATH, nombre_archivo)
         if not cv2.imwrite(filepath, frame):
-            return jsonify({'success': False, 'message': 'No se pudo guardar la foto de la camara'})
+            return jsonify({'success': False, 'message': 'No se pudo guardar la foto de la cámara'})
 
         resultado = actualizar_entrenamiento_usuario(usuario_id, [filepath])
         if resultado is None:
@@ -808,7 +1082,7 @@ def api_usuario_entrenar_camara(usuario_id):
             'muestras_total': resultado['muestras_total']
         })
     except Exception as e:
-        print("[ERROR] Entrenando usuario desde camara: {}".format(e))
+        print("[ERROR] Entrenando usuario desde cámara: {}".format(e))
         return jsonify({'success': False, 'message': str(e)})
 
 @app.route('/api/test', methods=['GET'])
@@ -830,13 +1104,14 @@ if __name__ == '__main__':
     print("  OMNIGUARD RESIDENTIAL AI")
     print("  Sistema de Seguridad Inteligente")
     print("=" * 50)
-    print("  Camaras detectadas: {}".format(CONFIG_CAMARAS['detectadas']))
+    print("  Cámaras detectadas: {}".format(CONFIG_CAMARAS['detectadas']))
     print("\n" + "=" * 50)
     print("  Servidor: http://localhost:{}".format(Config.PORT))
     print("  Registro: http://localhost:{}/registro".format(Config.PORT))
     print("  Panel Guardia: http://localhost:{}/login".format(Config.PORT))
     print("   Usuario: {}".format(Config.ADMIN_USERNAME))
-    print("   Contrasena: {}".format(Config.ADMIN_PASSWORD))
+    print("   Contraseña: {}".format(Config.ADMIN_PASSWORD))
     print("\n" + "=" * 50)
     
     app.run(host=Config.HOST, port=Config.PORT, debug=False, use_reloader=False)
+

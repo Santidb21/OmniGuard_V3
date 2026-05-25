@@ -1,0 +1,96 @@
+﻿<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OmniGuard - Bitácora</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/estilos.css') }}">
+    <style>
+        .main { max-width: 1120px; margin: 0 auto; padding: 20px; }
+        .panel { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+        .toolbar { display: flex; gap: 10px; flex-wrap: wrap; margin: 14px 0; }
+        .table-wrap { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 10px; border-bottom: 1px solid var(--border); text-align: left; font-size: .9rem; }
+        th { color: var(--text-secondary); font-weight: 500; }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="container">
+            <a class="logo" href="/dashboard" style="text-decoration:none;">OMNI<span>GUARD</span></a>
+            <ul class="nav-links">
+                <li><a href="/dashboard">Inicio</a></li>
+                {% if session.rol in ['administrador', 'vigilante'] %}<li><a href="/camaras">Cámaras</a></li>{% endif %}
+                <li><a href="/logout">Salir</a></li>
+            </ul>
+        </div>
+    </header>
+    <main class="main">
+        <section class="panel">
+            <h2>Bitácora de entrada y salida</h2>
+            <div class="toolbar">
+                <select class="form-select" id="tipo" onchange="cargarRegistros()">
+                    <option value="">Todos</option>
+                    <option value="residente">Residentes</option>
+                    <option value="visitante">Visitantes</option>
+                </select>
+                <select class="form-select" id="accion" onchange="cargarRegistros()">
+                    <option value="">Entrada y salida</option>
+                    <option value="entrada">Entrada</option>
+                    <option value="salida">Salida</option>
+                </select>
+                <select class="form-select" id="caseta" onchange="cargarRegistros()">
+                    <option value="">Casetas asignadas</option>
+                </select>
+                <input class="form-input" id="casa" placeholder="Casa" oninput="cargarRegistros()">
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>Fecha</th><th>Caseta</th><th>ID</th><th>Tipo</th><th>Casa</th><th>Acción</th><th>Confianza</th></tr></thead>
+                    <tbody id="registros"><tr><td colspan="7">Cargando...</td></tr></tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+    <script>
+        async function cargarRegistros() {
+            const params = new URLSearchParams({
+                tipo: document.getElementById('tipo').value,
+                accion: document.getElementById('accion').value,
+                caseta_id: document.getElementById('caseta').value,
+                casa: document.getElementById('casa').value
+            });
+            const resp = await fetch('/api/registros?' + params.toString());
+            const data = await resp.json();
+            const tbody = document.getElementById('registros');
+            if (!data.registros || data.registros.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7">Sin registros para las casetas asignadas</td></tr>';
+                return;
+            }
+            tbody.innerHTML = data.registros.map(r => `
+                <tr>
+                    <td>${r.fecha_hora || ''}</td>
+                    <td>${r.caseta_nombre || 'Sin caseta'}</td>
+                    <td>${r.usuario_id}</td>
+                    <td>${r.tipo_usuario}</td>
+                    <td>${r.numero_casa}</td>
+                    <td>${r.tipo_accion}</td>
+                    <td>${r.confianza ? Math.round(r.confianza * 100) + '%' : '-'}</td>
+                </tr>
+            `).join('');
+        }
+        async function cargarCasetas() {
+            const resp = await fetch('/api/mis-casetas');
+            const data = await resp.json();
+            const select = document.getElementById('caseta');
+            const casetas = data.casetas || [];
+            select.innerHTML = '<option value="">Casetas asignadas</option>' + casetas.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
+        }
+        cargarCasetas().then(cargarRegistros);
+    </script>
+</body>
+</html>
+
+
+

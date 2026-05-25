@@ -1,0 +1,158 @@
+﻿<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OmniGuard - Casetas</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/estilos.css') }}">
+    <style>
+        .main { max-width: 1180px; margin: 0 auto; padding: 20px; }
+        .layout { display: grid; grid-template-columns: 380px 1fr; gap: 16px; }
+        .panel { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+        .form-grid { display: grid; gap: 10px; margin-top: 14px; }
+        .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+        .table-wrap { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 10px; border-bottom: 1px solid var(--border); text-align: left; font-size: .86rem; vertical-align: top; }
+        th { color: var(--text-secondary); font-weight: 500; }
+        @media (max-width: 960px) { .layout, .two { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="container">
+            <a class="logo" href="/dashboard" style="text-decoration:none;">OMNI<span>GUARD</span></a>
+            <ul class="nav-links">
+                <li><a href="/dashboard">Inicio</a></li>
+                <li><a href="/administracion/usuarios">Usuarios</a></li>
+                <li><a href="/bitacora">Bitácora</a></li>
+                <li><a href="/logout">Salir</a></li>
+            </ul>
+        </div>
+    </header>
+    <main class="main">
+        <div class="layout">
+            <section class="panel">
+                <h2 id="formTitle">Nueva caseta</h2>
+                <form class="form-grid" id="casetaForm">
+                    <input type="hidden" id="casetaId">
+                    <div><label class="form-label">Nombre</label><input class="form-input" id="nombre" required></div>
+                    <div><label class="form-label">Dirección</label><input class="form-input" id="direccion" required></div>
+                    <div class="two">
+                        <div><label class="form-label">Colonia</label><input class="form-input" id="colonia" required></div>
+                        <div><label class="form-label">CP</label><input class="form-input" id="cp" required></div>
+                    </div>
+                    <div class="two">
+                        <div><label class="form-label">Ciudad</label><input class="form-input" id="ciudad" required></div>
+                        <div><label class="form-label">Estado</label><input class="form-input" id="estado" required></div>
+                    </div>
+                    <div class="two">
+                        <div><label class="form-label">Teléfono</label><input class="form-input" id="telefono"></div>
+                        <div><label class="form-label">Correo electrónico</label><input class="form-input" id="email" type="email"></div>
+                    </div>
+                    <div><label class="form-label">Contacto de la colonia</label><input class="form-input" id="contacto_colonia"></div>
+                    <div><label class="form-label">Teléfonos de emergencia</label><textarea class="form-input" id="telefonos_emergencia" rows="3"></textarea></div>
+                    <div>
+                        <label class="form-label">Estado</label>
+                        <select class="form-select" id="estado_registro">
+                            <option value="activa">Activa</option>
+                            <option value="inactiva">Inactiva</option>
+                        </select>
+                    </div>
+                    <div class="actions">
+                        <button class="btn btn-primary" type="submit">Guardar</button>
+                        <button class="btn" type="button" onclick="limpiarForm()">Nueva</button>
+                    </div>
+                </form>
+            </section>
+            <section class="panel">
+                <h2>Casetas</h2>
+                <div class="table-wrap" style="margin-top:14px;">
+                    <table>
+                        <thead><tr><th>Caseta</th><th>Ubicación</th><th>Contacto</th><th>Emergencia</th><th>Acciones</th></tr></thead>
+                        <tbody id="casetas"><tr><td colspan="5">Cargando...</td></tr></tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+    </main>
+    <script>
+        let casetas = [];
+        const ids = ['nombre','direccion','colonia','cp','ciudad','estado','telefono','email','contacto_colonia','telefonos_emergencia','estado_registro'];
+
+        function payload() {
+            const data = {};
+            ids.forEach(id => data[id] = document.getElementById(id).value);
+            return data;
+        }
+
+        function limpiarForm() {
+            document.getElementById('formTitle').textContent = 'Nueva caseta';
+            document.getElementById('casetaId').value = '';
+            document.getElementById('casetaForm').reset();
+            document.getElementById('estado_registro').value = 'activa';
+        }
+
+        function editarCaseta(id) {
+            const c = casetas.find(x => x.id === id);
+            if (!c) return;
+            document.getElementById('formTitle').textContent = 'Editar caseta';
+            document.getElementById('casetaId').value = c.id;
+            ids.forEach(key => document.getElementById(key).value = c[key] || '');
+        }
+
+        async function eliminarCaseta(id) {
+            if (!confirm('Eliminar esta caseta?')) return;
+            const resp = await fetch('/api/casetas/' + id, { method: 'DELETE' });
+            const data = await resp.json();
+            if (!data.success) alert(data.message || 'No se pudo eliminar');
+            cargarCasetas();
+        }
+
+        async function cargarCasetas() {
+            const resp = await fetch('/api/casetas');
+            const data = await resp.json();
+            casetas = data.casetas || [];
+            const tbody = document.getElementById('casetas');
+            if (!casetas.length) {
+                tbody.innerHTML = '<tr><td colspan="5">Sin casetas</td></tr>';
+                return;
+            }
+            tbody.innerHTML = casetas.map(c => `
+                <tr>
+                    <td><strong>${c.nombre}</strong><br>${c.estado_registro}</td>
+                    <td>${c.direccion}<br>${c.colonia}, ${c.cp}<br>${c.ciudad}, ${c.estado}</td>
+                    <td>${c.telefono || '-'}<br>${c.email || '-'}<br>${c.contacto_colonia || '-'}</td>
+                    <td>${(c.telefonos_emergencia || '-').replaceAll('\\n', '<br>')}</td>
+                    <td class="actions">
+                        <button class="btn btn-sm" onclick="editarCaseta(${c.id})">Editar</button>
+                        <button class="btn btn-sm btn-danger" onclick="eliminarCaseta(${c.id})">Eliminar</button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        document.getElementById('casetaForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const id = document.getElementById('casetaId').value;
+            const resp = await fetch(id ? '/api/casetas/' + id : '/api/casetas', {
+                method: id ? 'PUT' : 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload())
+            });
+            const data = await resp.json();
+            if (!data.success) {
+                alert(data.message || 'No se pudo guardar');
+                return;
+            }
+            limpiarForm();
+            cargarCasetas();
+        });
+
+        cargarCasetas();
+    </script>
+</body>
+</html>
+
+

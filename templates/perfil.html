@@ -1,0 +1,41 @@
+﻿<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OmniGuard - Perfil</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/estilos.css') }}">
+    <style>
+        .main { max-width: 760px; margin: 0 auto; padding: 24px 20px; }
+        .panel { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+        .row { display: grid; grid-template-columns: 180px 1fr; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+        .row:last-child { border-bottom: 0; }
+        .label { color: var(--text-secondary); }
+        @media (max-width: 640px) { .row { grid-template-columns: 1fr; gap: 2px; } }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="container">
+            <a class="logo" href="/dashboard" style="text-decoration:none;">OMNI<span>GUARD</span></a>
+            <ul class="nav-links">
+                <li><a href="/dashboard">Inicio</a></li>
+                <li><a href="/logout">Salir</a></li>
+            </ul>
+        </div>
+    </header>
+    <main class="main">
+        <section class="panel">
+            <h2>Mis datos</h2>
+            <div class="row"><div class="label">Nombre</div><div>{{ cuenta.nombre_completo }}</div></div>
+            <div class="row"><div class="label">Usuario</div><div>{{ cuenta.usuario }}</div></div>
+            <div class="row"><div class="label">Rol</div><div>{{ roles.get(cuenta.rol, cuenta.rol) }}</div></div>
+            <div class="row"><div class="label">Estado</div><div>{{ cuenta.estado }}</div></div>
+            <div class="row"><div class="label">Creación</div><div>{{ cuenta.fecha_creacion }}</div></div>
+            <div class="row"><div class="label">Último acceso</div><div>{{ cuenta.ultimo_acceso or 'Primer acceso' }}</div></div>
+        </section>
+    </main>
+</body>
+</html>
+
+
