@@ -2,7 +2,7 @@
 import sys
 import time
 import warnings
-import sqlite3
+
 import threading
 import cv2
 import numpy as np
@@ -65,6 +65,8 @@ CAMARAS_ACTIVAS = {
 CASETA_ACTIVA_ID = None
 
 detector_inicializado = False
+
+_db_inicializada = False
 
 ROLES_SISTEMA = {
     'administrador': 'Administrador',
@@ -220,19 +222,21 @@ def asegurar_cuenta_admin():
 
 @app.before_request
 def verificar_directorios():
+    global _db_inicializada
     os.makedirs(Config.FOTOS_PATH, exist_ok=True)
     os.makedirs(os.path.dirname(Config.DB_PATH), exist_ok=True)
     os.makedirs(Config.REGISTROS_PATH, exist_ok=True)
     os.makedirs(Config.LOGS_PATH, exist_ok=True)
-    init_db()
-    asegurar_cuenta_admin()
+    if not _db_inicializada:
+        init_db()
+        asegurar_cuenta_admin()
+        _db_inicializada = True
     verificar_mes_nuevo()
     verificar_visitantes_expirados()
 
 def verificar_mes_nuevo():
     try:
-        db_path = Config.DB_PATH
-        conn = sqlite3.connect(db_path)
+        conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS control_mes (
@@ -976,7 +980,7 @@ def api_caseta_eliminar(caseta_id):
     return jsonify({'success': True, 'message': 'Caseta eliminada'})
 
 @app.route('/api/usuarios/<usuario_id>/borrar', methods=['POST'])
-@roles_requeridos('administrador', 'vigilante')
+@roles_requeridos('administrador')
 def api_usuario_borrar(usuario_id):
     try:
         usuario = obtener_usuario_por_id(usuario_id)
@@ -993,7 +997,7 @@ def api_usuario_borrar(usuario_id):
         return jsonify({'success': False, 'message': str(e)})
 
 @app.route('/api/usuarios/<usuario_id>/entrenar', methods=['POST'])
-@roles_requeridos('administrador', 'vigilante')
+@roles_requeridos('administrador')
 def api_usuario_entrenar(usuario_id):
     try:
         usuario = obtener_usuario_por_id(usuario_id)
@@ -1038,7 +1042,7 @@ def api_usuario_entrenar(usuario_id):
         return jsonify({'success': False, 'message': str(e)})
 
 @app.route('/api/usuarios/<usuario_id>/entrenar/camara', methods=['POST'])
-@roles_requeridos('administrador', 'vigilante')
+@roles_requeridos('administrador')
 def api_usuario_entrenar_camara(usuario_id):
     try:
         usuario = obtener_usuario_por_id(usuario_id)
@@ -1094,6 +1098,7 @@ def api_test():
     })
 
 @app.route('/static/fotos/<filename>')
+@login_requerido
 def servir_foto(filename):
     return send_from_directory(Config.FOTOS_PATH, filename)
 

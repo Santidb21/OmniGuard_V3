@@ -26,6 +26,8 @@ def _import_face_recognition_bg():
     global face_recognition
     try:
         import face_recognition as fr
+        dummy = np.zeros((100, 100, 3), dtype=np.uint8)
+        _ = fr.face_encodings(dummy)
         face_recognition = fr
     except Exception:
         face_recognition = None
@@ -45,12 +47,13 @@ def intentar_cargar_face_recognition():
     ok = _face_rec_import_done.wait(timeout=8)
 
     if ok and face_recognition is not None:
-        print("[INFO] face_recognition (dlib) cargado")
+        print("[INFO] face_recognition (dlib) disponible")
         return face_recognition
+    if ok and face_recognition is None:
+        print("[WARN] face_recognition importado pero fallo validacion, usando OpenCV como fallback")
     else:
-        print("[WARN] face_recognition no disponible (modelos no instalados o timeout), usando OpenCV como fallback")
-        face_recognition = None
-        return None
+        print("[WARN] face_recognition no disponible tras 8s de timeout, usando OpenCV como fallback")
+    return None
 
 
 class DetectorRostro:
@@ -88,7 +91,17 @@ class DetectorRostro:
 
             intentar_cargar_face_recognition()
             dummy = np.zeros((96, 96, 3), dtype=np.uint8)
-            self.feature_dim = len(self.extraer_embedding_opencv(dummy, (0, 0, 96, 96)))
+            if face_recognition is not None:
+                dummy_rgb = cv2.cvtColor(dummy, cv2.COLOR_BGR2RGB)
+                try:
+                    encodings = face_recognition.face_encodings(dummy_rgb)
+                    self.feature_dim = encodings[0].size if encodings else 128
+                except Exception:
+                    self.feature_dim = 128
+                print("[INFO] feature_dim desde face_recognition (dlib): {}".format(self.feature_dim))
+            else:
+                self.feature_dim = len(self.extraer_embedding_opencv(dummy, (0, 0, 96, 96)))
+                print("[INFO] feature_dim desde OpenCV fallback: {}".format(self.feature_dim))
             self.actualizar_cache()
             self.inicializado = True
             return True
@@ -131,7 +144,10 @@ class DetectorRostro:
             self.confirmaciones_deteccion = {}
 
             print("[DEBUG] feature_dim actual del detector: {}".format(self.feature_dim))
-            print("[DEBUG] Motor activo: {}".format("face_recognition (dlib)" if face_recognition else "OpenCV fallback"))
+            print("[DEBUG] Motor primario: {}".format("face_recognition (dlib)" if face_recognition else "OpenCV (sin dlib)"))
+            print("[DEBUG] OpenCV Haar cascades disponibles como fallback de deteccion")
+            if face_recognition:
+                print("[DEBUG] Fallback de embedding: OpenCV HOG+LBP")
 
             for usuario in usuarios:
                 usuario_id = usuario["id"]
@@ -274,6 +290,28 @@ class DetectorRostro:
         x2, y2 = min(ancho, x2 + margen_x), min(alto, y2 + margen_y)
         return x1, y1, x2, y2
 
+    def extraer_embedding_face_recognition(self, imagen, caja_rostro):
+        try:
+            if face_recognition is None:
+                return None
+            x1, y1, x2, y2 = self.normalizar_caja(imagen, caja_rostro)
+            rostro = imagen[y1:y2, x1:x2]
+            if rostro.size == 0:
+                return None
+            rgb = cv2.cvtColor(rostro, cv2.COLOR_BGR2RGB)
+            encodings = face_recognition.face_encodings(rgb)
+            if encodings:
+                return encodings[0].astype(np.float32)
+            return None
+        except Exception:
+            return None
+
+    def extraer_embedding(self, imagen, caja_rostro):
+        embedding = self.extraer_embedding_face_recognition(imagen, caja_rostro)
+        if embedding is not None:
+            return embedding
+        return self.extraer_embedding_opencv(imagen, caja_rostro)
+
     def extraer_embedding_opencv(self, imagen, caja_rostro):
         try:
             x1, y1, x2, y2 = self.normalizar_caja(imagen, caja_rostro)
@@ -334,7 +372,7 @@ class DetectorRostro:
         rostros = self.detectar_rostros_opencv(imagen)
         if not rostros:
             return []
-        embedding = self.extraer_embedding_opencv(imagen, rostros[0])
+        embedding = self.extraer_embedding(imagen, rostros[0])
         return [embedding] if embedding is not None else []
 
     def comparar_rostros(self, embedding1, embedding2):
@@ -398,7 +436,7 @@ class DetectorRostro:
             return {"rostro": None, "usuario_id": None, "confianza": 0.0}
 
         caja = rostros[0]
-        embedding = self.extraer_embedding_opencv(imagen, caja)
+        embedding = self.extraer_embedding(imagen, caja)
         if embedding is None:
             self.limpiar_confirmacion(contexto)
             print("[DEBUG] analizar_frame: rostro detectado pero embedding es None")

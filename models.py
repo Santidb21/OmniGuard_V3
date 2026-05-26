@@ -1,9 +1,14 @@
 import sqlite3
 import os
+import time
+import functools
 from datetime import datetime, timedelta, timezone
 from config import Config
 
 CDMX_TZ = timezone(timedelta(hours=-6), "America/Mexico_City")
+
+RETRY_SLEEP = 0.1
+RETRY_ATTEMPTS = 5
 
 
 def ahora_cdmx():
@@ -14,10 +19,29 @@ def fecha_hora_cdmx():
     return ahora_cdmx().strftime('%Y-%m-%d %H:%M:%S')
 
 
+def retry_on_locked(func):
+    """Reintenta la funcion si SQLite devuelve 'database is locked'."""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        last_error = None
+        for attempt in range(RETRY_ATTEMPTS):
+            try:
+                return func(*args, **kwargs)
+            except sqlite3.OperationalError as e:
+                if 'locked' in str(e).lower() and attempt < RETRY_ATTEMPTS - 1:
+                    time.sleep(RETRY_SLEEP * (attempt + 1))
+                    last_error = e
+                    continue
+                raise
+        raise last_error
+    return wrapper
+
+
 def get_db_connection():
     conn = sqlite3.connect(Config.DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute('PRAGMA journal_mode=WAL;')
+    conn.execute('PRAGMA busy_timeout=5000;')
     return conn
 
 def init_db():
@@ -152,6 +176,7 @@ def init_db():
     conn.close()
 
 
+@retry_on_locked
 def crear_cuenta_sistema(usuario, password_hash, nombre_completo, rol):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -211,6 +236,7 @@ def obtener_casetas_de_cuenta(cuenta_id):
     return casetas
 
 
+@retry_on_locked
 def asignar_casetas_cuenta(cuenta_id, caseta_ids):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -223,6 +249,7 @@ def asignar_casetas_cuenta(cuenta_id, caseta_ids):
     conn.close()
 
 
+@retry_on_locked
 def actualizar_cuenta_sistema(cuenta_id, usuario, nombre_completo, rol, estado, password_hash=None):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -242,6 +269,7 @@ def actualizar_cuenta_sistema(cuenta_id, usuario, nombre_completo, rol, estado, 
     conn.close()
 
 
+@retry_on_locked
 def eliminar_cuenta_sistema(cuenta_id):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -251,6 +279,7 @@ def eliminar_cuenta_sistema(cuenta_id):
     conn.close()
 
 
+@retry_on_locked
 def registrar_acceso_cuenta(cuenta_id):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -261,6 +290,7 @@ def registrar_acceso_cuenta(cuenta_id):
     conn.close()
 
 
+@retry_on_locked
 def crear_caseta(nombre, direccion, colonia, cp, ciudad, estado, telefono, email, contacto_colonia, telefonos_emergencia):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -296,6 +326,7 @@ def obtener_caseta(caseta_id):
     return caseta
 
 
+@retry_on_locked
 def actualizar_caseta(caseta_id, nombre, direccion, colonia, cp, ciudad, estado, telefono, email, contacto_colonia, telefonos_emergencia, estado_registro):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -309,6 +340,7 @@ def actualizar_caseta(caseta_id, nombre, direccion, colonia, cp, ciudad, estado,
     conn.close()
 
 
+@retry_on_locked
 def eliminar_caseta(caseta_id):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -344,6 +376,7 @@ def generar_id(tipo_usuario):
     conn.close()
     return user_id
 
+@retry_on_locked
 def crear_solicitud(nombre_completo, numero_casa, tipo, foto_path, embedding=None):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -372,6 +405,7 @@ def obtener_solicitudes_pendientes():
     conn.close()
     return solicitudes
 
+@retry_on_locked
 def aceptar_solicitud(solicitud_id):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -400,6 +434,7 @@ def aceptar_solicitud(solicitud_id):
     
     conn.close()
 
+@retry_on_locked
 def denegar_solicitud(solicitud_id):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -434,6 +469,7 @@ def obtener_usuarios_activos():
     conn.close()
     return usuarios
 
+@retry_on_locked
 def dar_de_baja_usuario(usuario_id, eliminar=False):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -446,6 +482,7 @@ def dar_de_baja_usuario(usuario_id, eliminar=False):
     conn.commit()
     conn.close()
 
+@retry_on_locked
 def eliminar_visitantes_expirados():
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -487,6 +524,7 @@ def eliminar_visitantes_expirados():
     
     return len(eliminados)
 
+@retry_on_locked
 def registrar_entrada_salida(usuario_id, tipo_usuario, numero_casa, tipo_accion, confianza, caseta_id=None):
     if tipo_accion not in ("entrada", "salida"):
         return False
@@ -598,6 +636,7 @@ def obtener_embedding(usuario_id):
     conn.close()
     return result['embedding'] if result else None
 
+@retry_on_locked
 def guardar_embedding(usuario_id, embedding_bytes):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -617,6 +656,7 @@ def obtener_registros_no_sincronizados(limite=50):
     return registros
 
 
+@retry_on_locked
 def marcar_registros_sincronizados(lista_ids):
     if not lista_ids:
         return 0
