@@ -568,8 +568,9 @@ def registrar_entrada_salida(usuario_id, tipo_usuario, numero_casa, tipo_accion,
     ''', (usuario_id, tipo_accion, fecha_actual))
 
     conn.commit()
+    nuevo_id = cursor.lastrowid
     conn.close()
-    return True
+    return nuevo_id
 
 def obtener_ultimo_registro():
     conn = get_db_connection()

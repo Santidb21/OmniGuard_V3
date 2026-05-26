@@ -30,6 +30,10 @@ class Config:
     FOTOS_PATH = os.path.join(BASE_DIR, 'static', 'fotos')
     REGISTROS_PATH = os.path.join(BASE_DIR, 'DB', 'Registros_Mensuales')
     LOGS_PATH = os.path.join(BASE_DIR, 'logs')
+    RESPALDOS_PATH = os.path.join(BASE_DIR, 'DB', 'Respaldos_C')
+    SYNC_URL = os.environ.get('SYNC_URL', '')
+    SYNC_INTERVAL = 0.5
+    RESPALDOS_DIAS = 7
     
     MAX_CONTENT_LENGTH = 10 * 1024 * 1024
     ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}

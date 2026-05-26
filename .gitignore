@@ -1,8 +1,11 @@
 __pycache__/
 *.pyc
 *.pyo
+*.docx
+~$*
 static/fotos/*
 !static/fotos/.gitkeep
 DB/Registros_Mensuales/
+DB/Respaldos_C/
 logs/
 *.db

@@ -107,8 +107,10 @@ OmniGuard_V3/
 │   ├── omniguard.db         # Base de datos SQLite principal
 │   │                         # Tablas: usuarios, solicitudes,
 │   │                         # registros_entrada_salida, etc.
-│   └── Registros_Mensuales/  # Backups mensuales
-│       └── Abril_2026.db    # Registros exportados por mes
+│   ├── Registros_Mensuales/  # Backups mensuales
+│   │   └── Abril_2026.db    # Registros exportados por mes
+│   └── Respaldos_C/          # Respaldo continuo cada 0.5s
+│       └── YYYY-MM-DD.jsonl # Registros no sincronizados (retencion 7 dias)
 │
 └── logs/                     # Archivos de log del sistema
 ```
@@ -688,6 +690,57 @@ Para hacer un respaldo manual:
 1. Copie el archivo `DB/omniguard.db`
 2. Guárdelo en una ubicación segura
 
+### 13.3 Sincronización Continua (Offline-First)
+
+El sistema incluye un sincronizador automático que protege los datos ante cortes eléctricos o fallos del sistema.
+
+#### Funcionamiento
+
+```
+Cada 0.5 segundos (hilo daemon en segundo plano):
+  sincronizador.py
+    ├─ 1. Leer registros con sincronizado=0
+    ├─ 2. Escribir respaldo local → DB/Respaldos_C/YYYY-MM-DD.jsonl
+    ├─ 3. Push a cloud (si SYNC_URL configurada)
+    ├─ 4. Pull desde cloud (si SYNC_URL configurada)
+    ├─ 5. Marcar registros como sincronizado=1
+    └─ 6. Cada ~60s: borrar archivos .jsonl con mtime > 7 días
+```
+
+#### Archivos generados
+
+| Archivo | Formato | Retención |
+|---------|---------|-----------|
+| `DB/Respaldos_C/2026-05-26.jsonl` | JSONL (1 JSON por línea) | 7 días |
+
+#### Flujo de protección
+
+1. Cada registro de entrada/salida se inserta con `sincronizado=0`
+2. El sincronizador (cada 0.5s) recoge los registros pendientes
+3. **Primero** escribe el respaldo local en `Respaldos_C/` (protección contra cortes)
+4. **Después** intenta enviar a la nube si `SYNC_URL` está configurada
+5. **Finalmente** marca como `sincronizado=1`
+6. Si hay un corte eléctrico entre 0 y 2: máximo 0.5s de datos perdidos
+
+#### Configuración en `config.py`
+
+```python
+RESPALDOS_PATH = os.path.join(BASE_DIR, 'DB', 'Respaldos_C')  # Carpeta local
+SYNC_URL = os.environ.get('SYNC_URL', '')                      # URL de la nube
+SYNC_INTERVAL = 0.5                                             # Segundos entre ciclos
+RESPALDOS_DIAS = 7                                              # Retención local
+```
+
+#### Integración con nube futura
+
+Cuando la base de datos en la nube esté operativa, solo hay que definir:
+
+```cmd
+set SYNC_URL=https://miapi.cloud/sync
+```
+
+El sincronizador comenzará automáticamente a hacer push/pull de registros.
+
 ---
 
 ## 14. API Endpoints
@@ -918,7 +971,21 @@ Esta sección define la secuencia recomendada para que cualquier agente de IA pu
 
 ## 17. Historial de Versiones
 
-### v3.1 (26/Abril/2026) - Actual
+### v3.3 (26/Mayo/2026) - Actual
+- Sincronizador continuo offline-first (cada 0.5s)
+- Respaldo local en `DB/Respaldos_C/` con retención de 7 días
+- Push/Pull a nube futura via `SYNC_URL`
+- JSONL diario como formato de respaldo
+- Protección contra cortes eléctricos (máx 0.5s de pérdida)
+- WAL mode + busy_timeout + retry_on_locked en SQLite
+- Auditoría IDOR: restricción de rutas críticas a solo administrador
+
+### v3.2 (Auditoría y optimización)
+- Corrección de fallback OpenCV (dlib primario, OpenCV secundario)
+- Documentación técnica completa (documento.md)
+- Pruebas de estrés: 500 peticiones concurrentes exitosas
+
+### v3.1 (26/Abril/2026)
 - Sistema de dos cámaras (entrada/salida)
 - Video en vivo en el panel del guardia
 - Eliminación automática de visitantes expirados (1 mes)

@@ -28,6 +28,7 @@ from models import (
 )
 from reconocimiento.registros import exportar_registros_mensuales
 from reconocimiento.detector import obtener_detector, iniciar_deteccion
+from reconocimiento.sincronizador import iniciar_sincronizador
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -131,6 +132,7 @@ def inicializar_sistema():
         print("[INFO] Detector facial inicializado")
     else:
         print("[WARN] Detector facial no disponible")
+    iniciar_sincronizador()
 
 def detectar_camaras():
     global CAMERAS_INFO
